@@ -1,4 +1,4 @@
-package com.jhddt.common;
+package com.jhddt.common.result;
 
 import lombok.Data;
 

@@ -1,4 +1,4 @@
-package com.jhddt.config;
+package com.jhddt.config.mybatisplus;
 
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import org.apache.ibatis.reflection.MetaObject;
@@ -6,6 +6,10 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 
+/**
+ * MyBatis-Plus 元数据对象处理器
+ * 自动填充 createTime 和 updateTime 字段
+ */
 @Component
 public class MyMetaObjectHandler implements MetaObjectHandler {
 

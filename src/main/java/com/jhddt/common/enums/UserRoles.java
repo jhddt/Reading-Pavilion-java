@@ -1,4 +1,4 @@
-package com.jhddt.domain.enums;
+package com.jhddt.common.enums;
 
 import com.baomidou.mybatisplus.annotation.EnumValue;
 import com.fasterxml.jackson.annotation.JsonValue;

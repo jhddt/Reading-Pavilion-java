@@ -2,14 +2,13 @@ spring:
   datasource:
     # MySQL 8
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/essay_system?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+    url: jdbc:mysql://localhost:3306/essay_system_v2?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
     username: root
     password: 1234
 
-    # ?? Druid ???
+    # Druid
     type: com.alibaba.druid.pool.DruidDataSource
 
-    # Druid ?????
     druid:
       initial-size: 5
       min-idle: 5
@@ -23,12 +22,10 @@ spring:
       pool-prepared-statements: true
       max-pool-prepared-statement-per-connection-size: 20
 
-      # ??????
       stat-view-servlet:
         enabled: true
         url-pattern: /druid/*
         login-username: admin
         login-password: admin
 
-      # ????????
       filters: stat,wall

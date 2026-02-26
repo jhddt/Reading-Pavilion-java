@@ -1,7 +1,7 @@
-package com.jhddt.mapper;
+package com.jhddt.module.user.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.jhddt.domain.entity.UserEntity;
+import com.jhddt.module.user.entity.UserEntity;
 import org.apache.ibatis.annotations.Mapper;
 
 @Mapper
