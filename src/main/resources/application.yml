@@ -29,3 +29,38 @@ spring:
         login-password: admin
 
       filters: stat,wall
+
+  # 文件上传配置
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# MinIO 配置
+minio:
+  endpoint: http://192.168.41.128:9000
+  access-key: admin
+  secret-key: 12345678
+  bucket-name: essayandfile
+
+# OCR 服务配置
+ocr:
+  service:
+    url: http://0.0.0.0:8000  # FastAPI OCR 服务地址
+
+# 文件上传配置
+file:
+  upload:
+    base-path: uploads
+    image-path: essay/images
+    document-path: essay/documents
+    allowed-image-types: jpg,jpeg,png
+    allowed-document-types: doc,docx,pdf,txt
+    max-file-size: 10485760  # 10MB
+
+# 日志配置（生产环境建议改为 INFO）
+logging:
+  level:
+    com.jhddt: INFO
+    org.springframework.security: WARN

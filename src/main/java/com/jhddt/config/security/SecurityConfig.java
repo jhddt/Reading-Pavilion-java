@@ -47,6 +47,12 @@ public class SecurityConfig {
                         .requestMatchers("/user/login").permitAll()
                         // 允许注册接口匿名访问
                         .requestMatchers("/user/add").permitAll()
+                        // 允许 Swagger 相关路径匿名访问
+                        .requestMatchers(
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html"
+                        ).permitAll()
                         // 其他所有请求都需要认证
                         .anyRequest().authenticated()
                 )
