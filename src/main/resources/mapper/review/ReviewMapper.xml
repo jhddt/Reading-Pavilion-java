@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.jhddt.module.review.mapper.ReviewMapper">
+
+    <!-- =========================
+         review_record
+         ========================= -->
+
+    <insert id="insertReviewRecord"
+            parameterType="com.jhddt.module.review.entity.ReviewRecordEntity"
+            useGeneratedKeys="true"
+            keyProperty="reviewId"
+            keyColumn="review_id">
+        INSERT INTO review_record
+        (essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
+         start_time, end_time, total_score, status, error_msg, retry_count, is_deleted)
+        VALUES
+        (#{essayId}, #{taskId}, #{ruleVersion}, #{reviewerType}, #{reviewerId}, #{modelVersion},
+         #{startTime}, #{endTime}, #{totalScore}, #{status}, #{errorMsg}, #{retryCount}, 0)
+    </insert>
+
+    <update id="updateReviewRecordById"
+            parameterType="com.jhddt.module.review.entity.ReviewRecordEntity">
+        UPDATE review_record
+        <set>
+            <if test="essayId != null">essay_id = #{essayId},</if>
+            <if test="taskId != null">task_id = #{taskId},</if>
+            <if test="ruleVersion != null">rule_version = #{ruleVersion},</if>
+            <if test="reviewerType != null">reviewer_type = #{reviewerType},</if>
+            <if test="reviewerId != null">reviewer_id = #{reviewerId},</if>
+            <if test="modelVersion != null">model_version = #{modelVersion},</if>
+            <if test="startTime != null">start_time = #{startTime},</if>
+            <if test="endTime != null">end_time = #{endTime},</if>
+            <if test="totalScore != null">total_score = #{totalScore},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="retryCount != null">retry_count = #{retryCount},</if>
+            is_deleted = 0
+        </set>
+        WHERE review_id = #{reviewId} AND is_deleted = 0
+    </update>
+
+    <select id="selectReviewRecordById"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
+        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
+               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
+        FROM review_record
+        WHERE review_id = #{reviewId} AND is_deleted = 0
+    </select>
+
+    <select id="selectReviewRecordsByEssayId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
+        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
+               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
+        FROM review_record
+        WHERE essay_id = #{essayId} AND is_deleted = 0
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectReviewRecordsPage"
+            resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
+        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
+               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
+        FROM review_record
+        WHERE is_deleted = 0
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="reviewerType != null">
+            AND reviewer_type = #{reviewerType}
+        </if>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- =========================
+         review_score
+         ========================= -->
+
+    <insert id="insertReviewScores">
+        INSERT INTO review_score (review_id, dimension_id, weight_snapshot, score, is_deleted)
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (#{i.reviewId}, #{i.dimensionId}, #{i.weightSnapshot}, #{i.score}, 0)
+        </foreach>
+    </insert>
+
+    <select id="selectScoresByReviewId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ReviewScoreEntity">
+        SELECT score_id, review_id, dimension_id, weight_snapshot, score, create_time, is_deleted
+        FROM review_score
+        WHERE review_id = #{reviewId} AND is_deleted = 0
+        ORDER BY dimension_id ASC
+    </select>
+
+    <!-- =========================
+         review_comment
+         ========================= -->
+
+    <insert id="insertReviewComments">
+        INSERT INTO review_comment (review_id, comment_type, content, is_deleted)
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (#{i.reviewId}, #{i.commentType}, #{i.content}, 0)
+        </foreach>
+    </insert>
+
+    <select id="selectCommentsByReviewId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ReviewCommentEntity">
+        SELECT comment_id, review_id, comment_type, content, create_time, is_deleted
+        FROM review_comment
+        WHERE review_id = #{reviewId} AND is_deleted = 0
+        ORDER BY comment_type ASC, create_time ASC
+    </select>
+
+    <!-- =========================
+         score_dimension
+         ========================= -->
+
+    <select id="selectAllDimensions"
+            resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        FROM score_dimension
+        WHERE is_deleted = 0
+        ORDER BY dimension_id ASC
+    </select>
+
+    <select id="selectEnabledDimensions"
+            resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        FROM score_dimension
+        WHERE status = 1 AND is_deleted = 0
+        ORDER BY dimension_id ASC
+    </select>
+
+    <select id="selectDimensionById"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        FROM score_dimension
+        WHERE dimension_id = #{id} AND is_deleted = 0
+    </select>
+
+    <insert id="insertDimension"
+            parameterType="com.jhddt.module.review.entity.ScoreDimensionEntity"
+            useGeneratedKeys="true"
+            keyProperty="dimensionId"
+            keyColumn="dimension_id">
+        INSERT INTO score_dimension (dimension_name, weight, max_score, status, is_deleted)
+        VALUES (#{dimensionName}, #{weight}, #{maxScore}, #{status}, 0)
+    </insert>
+
+    <update id="updateDimensionById"
+            parameterType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        UPDATE score_dimension
+        <set>
+            <if test="dimensionName != null">dimension_name = #{dimensionName},</if>
+            <if test="weight != null">weight = #{weight},</if>
+            <if test="maxScore != null">max_score = #{maxScore},</if>
+            <if test="status != null">status = #{status},</if>
+            is_deleted = 0
+        </set>
+        WHERE dimension_id = #{dimensionId} AND is_deleted = 0
+    </update>
+
+    <update id="updateDimensionStatus">
+        UPDATE score_dimension
+        SET status = #{status}
+        WHERE dimension_id = #{id} AND is_deleted = 0
+    </update>
+
+    <update id="deleteDimensionLogic">
+        UPDATE score_dimension
+        SET is_deleted = 1
+        WHERE dimension_id = #{id} AND is_deleted = 0
+    </update>
+
+</mapper>
+

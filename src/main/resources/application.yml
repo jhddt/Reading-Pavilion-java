@@ -37,6 +37,17 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
+  # SpringAI DeepSeek 配置（使用 OpenAI 兼容接口）
+  ai:
+    openai:
+      api-key: sk-ec558b259ac44d2b870693e12555ee96  # DeepSeek API Key
+      base-url: https://api.deepseek.com  # DeepSeek API 地址
+      chat:
+        options:
+          model: deepseek-chat  # 模型名称
+          temperature: 0.7      # 温度参数
+          max-tokens: 2000       # 最大 token 数
+
 # MinIO 配置
 minio:
   endpoint: http://192.168.41.128:9000
@@ -49,6 +60,13 @@ ocr:
   service:
     url: http://0.0.0.0:8000  # FastAPI OCR 服务地址
 
+# DeepSeek API 配置（保留用于兼容，已迁移到 SpringAI）
+deepseek:
+  api:
+    url: https://api.deepseek.com/v1/chat/completions  # DeepSeek API 地址
+    key: sk-ec558b259ac44d2b870693e12555ee96  # 请替换为您的 DeepSeek API Key
+    model: deepseek-chat  # 使用的模型名称（deepseek-chat 是官方标准模型，可能已包含 V3 版本能力）
+
 # 文件上传配置
 file:
   upload:
@@ -58,6 +76,11 @@ file:
     allowed-image-types: jpg,jpeg,png
     allowed-document-types: doc,docx,pdf,txt
     max-file-size: 10485760  # 10MB
+
+# 评审规则配置
+review:
+  rule:
+    version: v1.0  # 评分规则版本
 
 # 日志配置（生产环境建议改为 INFO）
 logging:
