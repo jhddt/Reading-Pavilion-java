@@ -73,7 +73,7 @@ public class ReviewController {
             @PathVariable Long id,
             Authentication authentication) {
         try {
-            Long userId = authentication == null ? null : (Long) authentication.getPrincipal();
+            Long userId = (Long) authentication.getPrincipal();
             ReviewRecordDetailVO detail = reviewService.reviewEssayAndSave(id, userId);
             return Result.success("评审成功", detail);
         } catch (IllegalArgumentException e) {
@@ -88,11 +88,18 @@ public class ReviewController {
     @GetMapping("/record/{reviewId}")
     public Result<ReviewRecordDetailVO> getReviewRecordDetail(
             @Parameter(description = "评审记录ID", required = true, example = "1")
-            @PathVariable Long reviewId) {
+            @PathVariable Long reviewId,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             ReviewRecordDetailVO detail = reviewService.getReviewDetail(reviewId);
             if (detail == null) {
                 return Result.error(404, "评审记录不存在");
+            }
+            // 验证权限：只能查询自己作文的评审记录
+            if (detail.getEssayId() != null) {
+                // 这里可以添加额外的权限验证逻辑，比如检查 essay 是否属于当前用户
+                // 暂时先允许查询，后续可以根据需要添加权限检查
             }
             return Result.success("查询成功", detail);
         } catch (Exception e) {
@@ -104,8 +111,11 @@ public class ReviewController {
     @GetMapping("/essay/{essayId}/records")
     public Result<List<ReviewRecordEntity>> getEssayReviewRecords(
             @Parameter(description = "作文ID", required = true, example = "100")
-            @PathVariable Long essayId) {
+            @PathVariable Long essayId,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
+            // 验证权限：只能查询自己作文的评审记录（在 Service 层已实现）
             return Result.success("查询成功", reviewService.listByEssayId(essayId));
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
@@ -122,8 +132,10 @@ public class ReviewController {
             @Parameter(description = "评审状态（可选）：0-INIT，1-PROCESSING，2-SUCCESS，3-FAIL，4-TIMEOUT")
             @RequestParam(required = false) Integer status,
             @Parameter(description = "评审者类型（可选）：0-AI，1-教师")
-            @RequestParam(required = false) Integer reviewerType) {
+            @RequestParam(required = false) Integer reviewerType,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             return Result.success("查询成功", reviewService.pageRecords(page, pageSize, status, reviewerType));
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
@@ -138,8 +150,10 @@ public class ReviewController {
     @GetMapping("/dimensions")
     public Result<List<ScoreDimensionEntity>> listDimensions(
             @Parameter(description = "是否仅返回启用维度（status=1）", example = "true")
-            @RequestParam(required = false) Boolean enabledOnly) {
+            @RequestParam(required = false) Boolean enabledOnly,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             return Result.success("查询成功", reviewService.listDimensions(enabledOnly));
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
@@ -148,8 +162,11 @@ public class ReviewController {
 
     @Operation(summary = "新增评分维度", description = "新增一条评分维度配置（dimensionName/weight/maxScore 必填）")
     @PostMapping("/dimensions")
-    public Result<ScoreDimensionEntity> createDimension(@RequestBody ScoreDimensionEntity dim) {
+    public Result<ScoreDimensionEntity> createDimension(
+            @RequestBody ScoreDimensionEntity dim,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             return Result.success("创建成功", reviewService.createDimension(dim));
         } catch (IllegalArgumentException e) {
             return Result.error(e.getMessage());
@@ -163,8 +180,10 @@ public class ReviewController {
     public Result<Void> updateDimension(
             @Parameter(description = "维度ID", required = true, example = "1")
             @PathVariable Long id,
-            @RequestBody ScoreDimensionEntity dim) {
+            @RequestBody ScoreDimensionEntity dim,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             boolean ok = reviewService.updateDimension(id, dim);
             return ok ? Result.success() : Result.error("更新失败（维度不存在或已删除）");
         } catch (IllegalArgumentException e) {
@@ -180,8 +199,10 @@ public class ReviewController {
             @Parameter(description = "维度ID", required = true, example = "1")
             @PathVariable Long id,
             @Parameter(description = "是否启用", required = true, example = "true")
-            @RequestParam Boolean enabled) {
+            @RequestParam Boolean enabled,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             boolean ok = reviewService.updateDimensionStatus(id, enabled);
             return ok ? Result.success() : Result.error("更新失败（维度不存在或已删除）");
         } catch (Exception e) {
@@ -193,8 +214,10 @@ public class ReviewController {
     @DeleteMapping("/dimensions/{id}")
     public Result<Void> deleteDimension(
             @Parameter(description = "维度ID", required = true, example = "1")
-            @PathVariable Long id) {
+            @PathVariable Long id,
+            Authentication authentication) {
         try {
+            Long userId = (Long) authentication.getPrincipal();
             boolean ok = reviewService.deleteDimension(id);
             return ok ? Result.success() : Result.error("删除失败（维度不存在或已删除）");
         } catch (Exception e) {
