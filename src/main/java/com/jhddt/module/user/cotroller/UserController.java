@@ -112,7 +112,7 @@ public class UserController {
     @PostMapping("/add")
     public Result<Void> addUser(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
-                    description = "用户信息（id、createTime、updateTime 由系统自动生成，无需填写）",
+                    description = "用户信息（id、createTime、updateTime、status 由系统自动生成，无需填写）",
                     required = true,
                     content = @Content(
                             schema = @Schema(implementation = UserEntity.class),
@@ -121,8 +121,7 @@ public class UserController {
                                       "userName": "lisi",
                                       "password": "123456",
                                       "realName": "李四",
-                                      "role": 1,
-                                      "status": 0
+                                      "role": 1
                                     }
                                     """)
                     )

@@ -52,6 +52,20 @@ public class UserEntity {
     private UserStatus status;
 
     /**
+     * 头像访问路径
+     */
+    @Schema(description = "头像访问路径")
+    @TableField(value = "avatar_url")
+    private String avatarUrl;
+
+    /**
+     * 头像更新时间
+     */
+    @Schema(description = "头像更新时间", accessMode = Schema.AccessMode.READ_ONLY)
+    @TableField(value = "avatar_update_time", fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime avatarUpdateTime;
+
+    /**
      * 创建时间
      */
     @Schema(description = "创建时间", accessMode = Schema.AccessMode.READ_ONLY)
