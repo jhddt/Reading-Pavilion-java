@@ -2,6 +2,7 @@ package com.jhddt.module.review.cotroller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.jhddt.common.result.Result;
+import com.jhddt.module.review.dto.TextCorrectionDTO;
 import com.jhddt.module.review.entity.ReviewRecordEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
 import com.jhddt.module.review.service.ReviewService;
@@ -20,6 +21,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Review 模块唯一 Controller（按功能聚合）
@@ -67,7 +69,7 @@ public class ReviewController {
                     )
             )
     })
-    @PostMapping("/essay/{id}")
+    @PostMapping(value = "/essay/{id}", consumes = "application/json", produces = "application/json")
     public Result<ReviewRecordDetailVO> reviewEssay(
             @Parameter(description = "作文ID", required = true, example = "100")
             @PathVariable Long id,
@@ -161,7 +163,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "新增评分维度", description = "新增一条评分维度配置（dimensionName/weight/maxScore 必填）")
-    @PostMapping("/dimensions")
+    @PostMapping(value = "/dimensions", consumes = "application/json", produces = "application/json")
     public Result<ScoreDimensionEntity> createDimension(
             @RequestBody ScoreDimensionEntity dim,
             Authentication authentication) {
@@ -176,7 +178,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "更新评分维度", description = "更新评分维度配置（支持部分字段更新）")
-    @PutMapping("/dimensions/{id}")
+    @PutMapping(value = "/dimensions/{id}", consumes = "application/json", produces = "application/json")
     public Result<Void> updateDimension(
             @Parameter(description = "维度ID", required = true, example = "1")
             @PathVariable Long id,
@@ -194,7 +196,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "启用/禁用评分维度", description = "通过 enabled=true/false 控制 status=1/0")
-    @PatchMapping("/dimensions/{id}/status")
+    @PatchMapping(value = "/dimensions/{id}/status", consumes = "application/json", produces = "application/json")
     public Result<Void> updateDimensionStatus(
             @Parameter(description = "维度ID", required = true, example = "1")
             @PathVariable Long id,
@@ -222,6 +224,60 @@ public class ReviewController {
             return ok ? Result.success() : Result.error("删除失败（维度不存在或已删除）");
         } catch (Exception e) {
             return Result.error("删除失败: " + e.getMessage());
+        }
+    }
+
+    // =========================
+    // 文本纠错测试接口
+    // =========================
+
+    @Operation(
+            summary = "测试文本纠错功能",
+            description = "调用外部文本纠错服务，返回纠错结果（不保存到数据库），用于测试纠错服务是否正常工作"
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "纠错成功",
+                    content = @Content(
+                            mediaType = "application/json",
+                            examples = @ExampleObject(value = """
+                                    {
+                                      "code": 200,
+                                      "message": "纠错成功",
+                                      "data": [
+                                        {
+                                          "originalText": "这是一个错别字",
+                                          "correctedText": "这是一个错别字",
+                                          "startOffset": 0,
+                                          "endOffset": 5,
+                                          "errorType": "spelling",
+                                          "suggestion": "建议修改为：这是一个错别字"
+                                        }
+                                      ]
+                                    }
+                                    """)
+                    )
+            )
+    })
+    @PostMapping(value = "/text-correction/test", consumes = "application/json", produces = "application/json")
+    public Result<List<TextCorrectionDTO>> testTextCorrection(
+            @Parameter(description = "待纠错的文本内容", required = true, example = "这是一篇测试作文，包含一些错别字和语法错误。")
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+        try {
+            Long userId = (Long) authentication.getPrincipal();
+            String text = request.get("text");
+            if (text == null || text.trim().isEmpty()) {
+                return Result.error("文本内容不能为空");
+            }
+            List<TextCorrectionDTO> corrections = reviewService.testTextCorrection(text);
+            return Result.success("纠错成功", corrections);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            log.error("文本纠错测试失败: {}", e.getMessage(), e);
+            return Result.error("文本纠错测试失败: " + e.getMessage());
         }
     }
 }

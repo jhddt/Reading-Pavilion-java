@@ -44,35 +44,85 @@
     <select id="selectReviewRecordById"
             parameterType="long"
             resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
-        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
-               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
-        FROM review_record
-        WHERE review_id = #{reviewId} AND is_deleted = 0
+        SELECT
+            rr.review_id,
+            rr.essay_id,
+            rr.task_id,
+            rr.rule_version,
+            rr.reviewer_type,
+            rr.reviewer_id,
+            rr.model_version,
+            rr.start_time,
+            rr.end_time,
+            rr.total_score,
+            rr.status,
+            rr.error_msg,
+            rr.retry_count,
+            rr.create_time,
+            rr.is_deleted,
+            e.title AS essay_title
+        FROM review_record rr
+                 LEFT JOIN essay e ON rr.essay_id = e.essay_id
+        WHERE rr.review_id = #{reviewId}
+          AND rr.is_deleted = 0
     </select>
 
     <select id="selectReviewRecordsByEssayId"
             parameterType="long"
             resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
-        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
-               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
-        FROM review_record
-        WHERE essay_id = #{essayId} AND is_deleted = 0
-        ORDER BY create_time DESC
+        SELECT
+            rr.review_id,
+            rr.essay_id,
+            rr.task_id,
+            rr.rule_version,
+            rr.reviewer_type,
+            rr.reviewer_id,
+            rr.model_version,
+            rr.start_time,
+            rr.end_time,
+            rr.total_score,
+            rr.status,
+            rr.error_msg,
+            rr.retry_count,
+            rr.create_time,
+            rr.is_deleted,
+            e.title AS essay_title
+        FROM review_record rr
+                 LEFT JOIN essay e ON rr.essay_id = e.essay_id
+        WHERE rr.essay_id = #{essayId}
+          AND rr.is_deleted = 0
+        ORDER BY rr.create_time DESC
     </select>
 
     <select id="selectReviewRecordsPage"
             resultType="com.jhddt.module.review.entity.ReviewRecordEntity">
-        SELECT review_id, essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
-               start_time, end_time, total_score, status, error_msg, retry_count, create_time, is_deleted
-        FROM review_record
-        WHERE is_deleted = 0
+        SELECT
+            rr.review_id,
+            rr.essay_id,
+            rr.task_id,
+            rr.rule_version,
+            rr.reviewer_type,
+            rr.reviewer_id,
+            rr.model_version,
+            rr.start_time,
+            rr.end_time,
+            rr.total_score,
+            rr.status,
+            rr.error_msg,
+            rr.retry_count,
+            rr.create_time,
+            rr.is_deleted,
+            e.title AS essay_title
+        FROM review_record rr
+                 LEFT JOIN essay e ON rr.essay_id = e.essay_id
+        WHERE rr.is_deleted = 0
         <if test="status != null">
-            AND status = #{status}
+            AND rr.status = #{status}
         </if>
         <if test="reviewerType != null">
-            AND reviewer_type = #{reviewerType}
+            AND rr.reviewer_type = #{reviewerType}
         </if>
-        ORDER BY create_time DESC
+        ORDER BY rr.create_time DESC
     </select>
 
     <!-- =========================
@@ -178,6 +228,21 @@
         SET is_deleted = 1
         WHERE dimension_id = #{id} AND is_deleted = 0
     </update>
+
+    <!-- =========================
+         text_correction
+         ========================= -->
+
+    <insert id="insertTextCorrections">
+        INSERT INTO text_correction
+        (review_id, original_text, corrected_text, start_offset, end_offset, error_type, suggestion, revision_no, create_time, update_time)
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (#{i.reviewId}, #{i.originalText}, #{i.correctedText},
+             #{i.startOffset}, #{i.endOffset}, #{i.errorType}, #{i.suggestion},
+             #{i.revisionNo}, NOW(), NOW())
+        </foreach>
+    </insert>
 
 </mapper>
 

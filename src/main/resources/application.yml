@@ -34,8 +34,8 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 50MB
+      max-request-size: 50MB
 
   # SpringAI DeepSeek 配置（使用 OpenAI 兼容接口）
   ai:
@@ -46,7 +46,7 @@ spring:
         options:
           model: deepseek-chat  # 模型名称
           temperature: 0.7      # 温度参数
-          max-tokens: 2000       # 最大 token 数
+          max-tokens: 4096       # 最大 token 数（DeepSeek 当前允许范围 [1, 8192]，适当留余量）
 
 # MinIO 配置
 minio:
@@ -75,7 +75,7 @@ file:
     document-path: essay/documents
     allowed-image-types: jpg,jpeg,png
     allowed-document-types: doc,docx,pdf,txt
-    max-file-size: 10485760  # 10MB
+    max-file-size: 52428800  # 50MB
 
 # 评审规则配置
 review:

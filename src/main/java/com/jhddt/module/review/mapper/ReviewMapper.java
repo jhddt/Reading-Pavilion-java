@@ -5,6 +5,7 @@ import com.jhddt.module.review.entity.ReviewCommentEntity;
 import com.jhddt.module.review.entity.ReviewRecordEntity;
 import com.jhddt.module.review.entity.ReviewScoreEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
+import com.jhddt.module.review.entity.TextCorrectionEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -69,5 +70,11 @@ public interface ReviewMapper {
     int updateDimensionStatus(@Param("id") Long id, @Param("status") Integer status);
 
     int deleteDimensionLogic(@Param("id") Long id);
+
+    // =========================
+    // text_correction
+    // =========================
+
+    int insertTextCorrections(@Param("list") List<TextCorrectionEntity> list);
 }
 

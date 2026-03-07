@@ -65,7 +65,7 @@ public class EssayController {
             ),
             @ApiResponse(responseCode = "500", description = "创建失败")
     })
-    @PostMapping("/text")
+    @PostMapping(value = "/text", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public Result<Long> createTextEssay(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "文本作文创建请求",
@@ -99,12 +99,12 @@ public class EssayController {
     }
 
     /**
-     * 2. 图片上传 + OCR 识别创建草稿
+     * 2. 图片上传 + OCR 识别创建草稿（支持多张图片合并为一篇作文）
      * POST /essay/image
      */
     @Operation(
-            summary = "图片上传创建草稿", 
-            description = "上传作文图片（支持 jpg/png/gif/bmp，最大5MB），通过 PaddleOCR 识别文字后自动创建作文草稿。" +
+            summary = "图片上传创建草稿（支持多张图片）",
+            description = "上传一张或多张作文图片（支持 jpg/png/gif/bmp，单张最大5MB），通过 OCR 识别后将多张图片的文字合并为一篇作文草稿。" +
                     "识别结果包含文本内容、准确率和对比图"
     )
     @ApiResponses({
@@ -129,96 +129,114 @@ public class EssayController {
                     mediaType = MediaType.MULTIPART_FORM_DATA_VALUE
             )
     )
-    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Transactional(rollbackFor = Exception.class)
     public Result<Long> createImageEssay(
-            @Parameter(description = "作文标题", required = true, example = "我的暑假生活") 
+            @Parameter(description = "作文标题", required = true, example = "我的暑假生活")
             @RequestParam String title,
             @Parameter(
-                    description = "图片文件（支持 jpg/jpeg/png/gif/bmp，最大5MB）", 
+                    description = "图片文件列表（支持 jpg/jpeg/png/gif/bmp，单张最大5MB），可上传多张",
                     required = true,
                     content = @io.swagger.v3.oas.annotations.media.Content(
                             mediaType = MediaType.MULTIPART_FORM_DATA_VALUE
                     )
-            ) @RequestParam("file") MultipartFile file,
+            ) @RequestParam("file") MultipartFile[] files,
             Authentication authentication) {
-        
+
         Long userId = (Long) authentication.getPrincipal();
 
-        // 1. 存储图片到 MinIO
-        String imagePath = fileStorageService.storeImage(file, userId);
+        if (files == null || files.length == 0) {
+            return Result.error("请至少上传一张图片");
+        }
 
-        // 2. 创建作文记录
+        // 1. 先创建作文记录（不依赖具体哪一张图片）
         EssayEntity essay = EssayEntity.builder()
                 .userId(userId)
                 .title(title)
                 .submitType(SubmitType.IMAGE)
-                .sourceFilePath(imagePath)
                 .status(EssayStatus.DRAFT)
                 .build();
         essayService.save(essay);
 
-        // 3. 保存文件记录
-        FileEntity fileEntity = FileEntity.builder()
-                .userId(userId)
-                .essayId(essay.getId())
-                .fileName(file.getOriginalFilename())
-                .fileType(file.getContentType())
-                .filePath(imagePath)
-                .fileSize(file.getSize())
-                .build();
-        fileService.save(fileEntity);
+        StringBuilder mergedText = new StringBuilder();
+        String firstSourcePath = null;
 
-        // 4. OCR 识别（如果失败会抛出异常，触发事务回滚）
-        OcrResult ocrResult = ocrService.recognizeText(imagePath);
-        
-        System.out.println("=== OCR 识别结果 ===");
-        System.out.println("识别文本长度: " + (ocrResult.getText() != null ? ocrResult.getText().length() : 0));
-        System.out.println("准确率: " + ocrResult.getAccuracy());
-        System.out.println("对比图是否存在: " + (ocrResult.getResultImage() != null && !ocrResult.getResultImage().isEmpty()));
-        if (ocrResult.getResultImage() != null) {
-            System.out.println("对比图数据长度: " + ocrResult.getResultImage().length());
-        }
+        int version = 1;
 
-        // 5. 保存 OCR 对比图（如果有）
-        String resultImagePath = null;
-        if (ocrResult.getResultImage() != null && !ocrResult.getResultImage().isEmpty()) {
-            try {
-                System.out.println("开始保存 OCR 对比图...");
-                resultImagePath = fileStorageService.storeBase64Image(
-                        ocrResult.getResultImage(), 
-                        userId, 
-                        "result.jpg"
-                );
-                System.out.println("OCR 对比图保存成功: " + resultImagePath);
-            } catch (Exception e) {
-                // 对比图保存失败不影响主流程
-                System.err.println("保存 OCR 对比图失败: " + e.getMessage());
-                e.printStackTrace();
+        // 2. 逐张图片处理：存储文件、OCR 识别、保存 OCR 记录，累加文字
+        for (MultipartFile file : files) {
+            if (file == null || file.isEmpty()) {
+                continue;
             }
-        } else {
-            System.out.println("OCR 服务未返回对比图数据");
+
+            // 2.1 存储图片到 MinIO
+            String imagePath = fileStorageService.storeImage(file, userId);
+            if (firstSourcePath == null) {
+                firstSourcePath = imagePath;
+            }
+
+            // 2.2 保存文件记录
+            FileEntity fileEntity = FileEntity.builder()
+                    .userId(userId)
+                    .essayId(essay.getId())
+                    .fileName(file.getOriginalFilename())
+                    .fileType(file.getContentType())
+                    .filePath(imagePath)
+                    .fileSize(file.getSize())
+                    .build();
+            fileService.save(fileEntity);
+
+            // 2.3 OCR 识别
+            OcrResult ocrResult = ocrService.recognizeText(imagePath);
+
+            String text = ocrResult.getText() != null ? ocrResult.getText().trim() : "";
+            if (!text.isEmpty()) {
+                if (mergedText.length() > 0) {
+                    mergedText.append("\n");
+                }
+                mergedText.append(text);
+            }
+
+            // 2.4 保存 OCR 对比图（如果有）
+            String resultImagePath = null;
+            if (ocrResult.getResultImage() != null && !ocrResult.getResultImage().isEmpty()) {
+                try {
+                    resultImagePath = fileStorageService.storeBase64Image(
+                            ocrResult.getResultImage(),
+                            userId,
+                            "result.jpg"
+                    );
+                } catch (Exception e) {
+                    // 对比图保存失败不影响主流程
+                    System.err.println("保存 OCR 对比图失败: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+
+            // 2.5 保存 OCR 记录（多张图片时 version 递增）
+            OcrRecordEntity ocrRecord = OcrRecordEntity.builder()
+                    .essayId(essay.getId())
+                    .fileId(fileEntity.getId())
+                    .version(version++)
+                    .isLatest(1)
+                    .ocrText(text)
+                    .resultImagePath(resultImagePath)
+                    .accuracy(ocrResult.getAccuracy())
+                    .engine("PaddleOCR")
+                    .build();
+            ocrRecordService.save(ocrRecord);
         }
 
-        // 6. 保存 OCR 记录
-        System.out.println("保存 OCR 记录，对比图路径: " + resultImagePath);
-        OcrRecordEntity ocrRecord = OcrRecordEntity.builder()
-                .essayId(essay.getId())
-                .fileId(fileEntity.getId())
-                .version(1)
-                .isLatest(1)
-                .ocrText(ocrResult.getText())
-                .resultImagePath(resultImagePath)
-                .accuracy(ocrResult.getAccuracy())
-                .engine("PaddleOCR")
-                .build();
-        ocrRecordService.save(ocrRecord);
-        System.out.println("OCR 记录保存完成，记录ID: " + ocrRecord.getOcrId());
+        String finalText = mergedText.toString();
+        if (finalText.isEmpty()) {
+            return Result.error("OCR 未识别出有效文字，请检查图片是否清晰");
+        }
 
-        // 7. 更新作文内容
-        essay.setOriginalContent(ocrResult.getText());
-        essay.setFinalContent(ocrResult.getText());
-        essay.setWordCount(ocrResult.getText().length());
+        // 3. 更新作文内容（多张图片的文字合并）
+        essay.setSourceFilePath(firstSourcePath);
+        essay.setOriginalContent(finalText);
+        essay.setFinalContent(finalText);
+        essay.setWordCount(finalText.length());
         essayService.updateById(essay);
 
         return Result.success("创建成功", essay.getId());
@@ -254,7 +272,7 @@ public class EssayController {
                     mediaType = MediaType.MULTIPART_FORM_DATA_VALUE
             )
     )
-    @PostMapping(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     @Transactional(rollbackFor = Exception.class)
     public Result<Long> createDocumentEssay(
             @Parameter(description = "作文标题", required = true, example = "我的暑假生活") 
@@ -318,7 +336,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "创建成功"),
             @ApiResponse(responseCode = "500", description = "创建失败")
     })
-    @PostMapping
+    @PostMapping(consumes = "application/json", produces = "application/json")
     public Result<Long> createDraft(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "作文信息（id、userId、createTime、updateTime 由系统自动生成）",
@@ -366,7 +384,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "修改成功"),
             @ApiResponse(responseCode = "500", description = "修改失败，可能原因：作文不存在、无权操作、非草稿状态等")
     })
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = "application/json", produces = "application/json")
     public Result<Void> updateDraft(
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long id,
@@ -425,7 +443,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "提交成功"),
             @ApiResponse(responseCode = "500", description = "提交失败，可能原因：作文不存在、无权操作、非草稿状态等")
     })
-    @PutMapping("/{id}/submit")
+    @PutMapping(value = "/{id}/submit", consumes = "application/json", produces = "application/json")
     public Result<Void> submitEssay(
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long id,
@@ -451,7 +469,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "撤回成功"),
             @ApiResponse(responseCode = "500", description = "撤回失败，可能原因：作文不存在、无权操作、非已提交状态等")
     })
-    @PutMapping("/{id}/withdraw")
+    @PutMapping(value = "/{id}/withdraw", consumes = "application/json", produces = "application/json")
     public Result<Void> withdrawEssay(
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long id,

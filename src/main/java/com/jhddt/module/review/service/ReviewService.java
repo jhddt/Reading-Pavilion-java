@@ -4,25 +4,42 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.jhddt.module.essay.entity.EssayEntity;
 import com.jhddt.module.essay.service.EssayService;
 import com.jhddt.module.review.dto.ReviewResult;
+import com.jhddt.module.review.dto.TextCorrectionDTO;
 import com.jhddt.module.review.entity.ReviewCommentEntity;
 import com.jhddt.module.review.entity.ReviewRecordEntity;
 import com.jhddt.module.review.entity.ReviewScoreEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
+import com.jhddt.module.review.entity.TextCorrectionEntity;
 import com.jhddt.module.review.mapper.ReviewMapper;
 import com.jhddt.module.review.vo.ReviewCommentVO;
 import com.jhddt.module.review.vo.ReviewRecordDetailVO;
 import com.jhddt.module.review.vo.ReviewScoreVO;
+import com.jhddt.common.util.JwtUtil;
+import com.jhddt.config.security.JwtProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpServletRequest;
+import io.jsonwebtoken.Claims;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Review 模块统一 Service（按功能聚合）
@@ -38,12 +55,25 @@ public class ReviewService {
     private final ChatClient chatClient;
     private final ReviewMapper reviewMapper;
     private final EssayService essayService;
+    private final RestTemplate restTemplate;
+    private final JwtUtil jwtUtil;
+    private final JwtProperties jwtProperties;
+
+    @Value("${correct.service.url:http://127.0.0.1:8001}")
+    private String correctServiceUrl;
 
     // =========================
     // 评审主流程
     // =========================
 
+    /**
+     * 发起批改（异步处理）
+     * 立即返回 reviewId 和 PROCESSING 状态，实际批改在后台异步执行
+     */
     public ReviewRecordDetailVO reviewEssayAndSave(Long essayId, Long userId) {
+        // 打印当前token的剩余有效期
+        printTokenRemainingValidity();
+        
         // 1) 查询作文并校验归属
         EssayEntity essay = essayService.getById(essayId);
         if (essay == null) {
@@ -73,46 +103,75 @@ public class ReviewService {
                 .ruleVersion(prompt)
                 .modelVersion("deepseek-chat")
                 .startTime(startTime)
-                .status(1)
+                .status(1) // PROCESSING
                 .retryCount(0)
                 .build();
         reviewMapper.insertReviewRecord(record);
         Long reviewId = record.getReviewId();
 
+        // 5) 异步执行实际批改逻辑
+        doReviewAsync(reviewId, essayId, essayContent, prompt, essay.getTitle());
+
+        // 6) 立即返回，包含 reviewId 和 PROCESSING 状态
+        ReviewRecordDetailVO vo = ReviewRecordDetailVO.builder()
+                .reviewId(reviewId)
+                .essayId(essayId)
+                .essayTitle(essay.getTitle())
+                .reviewerType(0)
+                .modelVersion("deepseek-chat")
+                .startTime(startTime)
+                .status(1) // PROCESSING
+                .build();
+        return vo;
+    }
+
+    /**
+     * 异步执行批改逻辑
+     */
+    @Async
+    public void doReviewAsync(Long reviewId, Long essayId, String essayContent, String prompt, String essayTitle) {
         try {
-            // 5) 调用 AI
+            log.info("开始异步批改，reviewId={}, essayId={}", reviewId, essayId);
+
+            // 1) 调用文本纠错服务，按行保存 diffs（不影响主流程，失败仅记录日志）
+            callTextCorrectionAndSave(reviewId, essayContent);
+
+            // 2) 调用 AI
             ReviewResult aiResult = callAi(prompt);
 
-            // 6) 保存各维度得分（先保存，用于计算总分）
+            // 3) 保存各维度得分（先保存，用于计算总分）
             List<ReviewScoreEntity> savedScores = saveDimensionScoresIfAny(reviewId, aiResult.getReviewContent());
 
-            // 7) 计算总分：从 review_score 表中同一 review_id 的所有 score 字段求和
+            // 4) 计算总分：从 review_score 表中同一 review_id 的所有 score 字段求和
             BigDecimal calculatedTotalScore = calculateTotalScoreFromSavedScores(reviewId);
             // 如果计算出总分就用计算的，否则用 AI 返回的总分作为兜底
             BigDecimal totalScore = calculatedTotalScore != null 
                     ? calculatedTotalScore 
                     : parseTotalScore(aiResult.getScore());
 
-            // 8) 更新记录（SUCCESS）
-            record.setReviewId(reviewId);
-            record.setStatus(2);
-            record.setEndTime(LocalDateTime.now());
-            record.setTotalScore(totalScore);
+            // 5) 更新记录（SUCCESS）
+            ReviewRecordEntity record = ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(2) // SUCCESS
+                    .endTime(LocalDateTime.now())
+                    .totalScore(totalScore)
+                    .build();
             reviewMapper.updateReviewRecordById(record);
 
-            // 9) 保存评论（总评/建议/修改意见）
+            // 6) 保存评论（总评/建议/修改意见）
             saveComments(reviewId, aiResult.getReviewContent());
 
-            // 10) 返回详情
-            return getReviewDetail(reviewId);
+            log.info("异步批改完成，reviewId={}, essayId={}, totalScore={}", reviewId, essayId, totalScore);
         } catch (Exception e) {
             // FAIL
-            record.setReviewId(reviewId);
-            record.setStatus(3);
-            record.setEndTime(LocalDateTime.now());
-            record.setErrorMsg(e.getMessage());
+            log.error("异步批改失败，reviewId={}, essayId={}, error={}", reviewId, essayId, e.getMessage(), e);
+            ReviewRecordEntity record = ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(3) // FAIL
+                    .endTime(LocalDateTime.now())
+                    .errorMsg(e.getMessage())
+                    .build();
             reviewMapper.updateReviewRecordById(record);
-            throw e;
         }
     }
 
@@ -148,6 +207,15 @@ public class ReviewService {
                         .build())
                 .toList();
 
+        // 获取作文标题
+        String essayTitle = null;
+        if (record.getEssayId() != null) {
+            EssayEntity essay = essayService.getById(record.getEssayId());
+            if (essay != null) {
+                essayTitle = essay.getTitle();
+            }
+        }
+
         return ReviewRecordDetailVO.builder()
                 .reviewId(record.getReviewId())
                 .essayId(record.getEssayId())
@@ -160,6 +228,7 @@ public class ReviewService {
                 .status(record.getStatus())
                 .errorMsg(record.getErrorMsg())
                 .createTime(record.getCreateTime())
+                .essayTitle(essayTitle)
                 .scores(scoreVOs)
                 .comments(commentVOs)
                 .build();
@@ -220,8 +289,15 @@ public class ReviewService {
         if (creating && (dim.getDimensionName() == null || dim.getDimensionName().trim().isEmpty())) {
             throw new IllegalArgumentException("dimensionName 不能为空");
         }
-        if (creating && dim.getWeight() == null) {
-            throw new IllegalArgumentException("weight 不能为空");
+        if (dim.getWeight() == null) {
+            if (creating) {
+                throw new IllegalArgumentException("weight 不能为空");
+            }
+        } else {
+            // 权重范围限制在 0-100（表示 0%-100%）
+            if (dim.getWeight().compareTo(BigDecimal.ZERO) < 0 || dim.getWeight().compareTo(new BigDecimal("100")) > 0) {
+                throw new IllegalArgumentException("weight 必须在 0 到 100 之间");
+            }
         }
         if (creating && dim.getMaxScore() == null) {
             throw new IllegalArgumentException("maxScore 不能为空");
@@ -244,6 +320,285 @@ public class ReviewService {
                 .score(score)
                 .timestamp(System.currentTimeMillis())
                 .build();
+    }
+
+    /**
+     * 调用外部文本纠错服务，并按行将 diffs 落库到 text_correction 表
+     * 接口：POST {correctServiceUrl}/correct，Body: { "text": "完整作文文本" }
+     * 期望返回格式示例：
+     * {
+     *   "diffs": [
+     *     { "lineNo": 1, "original": "原句", "corrected": "修改后", "comment": "说明" },
+     *     ...
+     *   ]
+     * }
+     */
+    private void callTextCorrectionAndSave(Long reviewId, String essayContent) {
+        if (reviewId == null || essayContent == null || essayContent.trim().isEmpty()) {
+            return;
+        }
+        try {
+            String url = correctServiceUrl.endsWith("/")
+                    ? correctServiceUrl + "correct"
+                    : correctServiceUrl + "/correct";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("text", essayContent);
+
+            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, requestEntity, Map.class);
+            if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
+                log.warn("文本纠错服务返回非 200 或空响应，status={}", response.getStatusCode());
+                return;
+            }
+
+            Object diffsObj = response.getBody().get("diffs");
+            if (!(diffsObj instanceof List<?> diffsList) || diffsList.isEmpty()) {
+                log.info("文本纠错服务未返回 diffs 或为空，reviewId={}", reviewId);
+                return;
+            }
+
+            List<TextCorrectionEntity> entities = new ArrayList<>();
+            for (Object o : diffsList) {
+                if (!(o instanceof Map<?, ?> m)) {
+                    continue;
+                }
+
+                // 兼容多种字段命名：lineNo/startOffset/endOffset/errorType/suggestion/comment 等
+                String original = m.get("original") != null ? m.get("original").toString() : null;
+                if (original == null && m.get("original_text") != null) {
+                    original = m.get("original_text").toString();
+                }
+                String corrected = m.get("corrected") != null ? m.get("corrected").toString() : null;
+                if (corrected == null && m.get("corrected_text") != null) {
+                    corrected = m.get("corrected_text").toString();
+                }
+
+                // 至少要有原文或改后文本才写入
+                if (original == null && corrected == null) {
+                    continue;
+                }
+
+                Integer startOffset = null;
+                Object startObj = m.get("startOffset");
+                if (startObj == null) startObj = m.get("start_offset");
+                if (startObj instanceof Number) {
+                    startOffset = ((Number) startObj).intValue();
+                } else if (startObj instanceof String s) {
+                    try {
+                        startOffset = Integer.parseInt(s);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                Integer endOffset = null;
+                Object endObj = m.get("endOffset");
+                if (endObj == null) endObj = m.get("end_offset");
+                if (endObj instanceof Number) {
+                    endOffset = ((Number) endObj).intValue();
+                } else if (endObj instanceof String s) {
+                    try {
+                        endOffset = Integer.parseInt(s);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                String errorType = null;
+                if (m.get("errorType") != null) {
+                    errorType = m.get("errorType").toString();
+                } else if (m.get("type") != null) {
+                    errorType = m.get("type").toString();
+                } else if (m.get("error_type") != null) {
+                    errorType = m.get("error_type").toString();
+                }
+
+                String suggestion = null;
+                if (m.get("suggestion") != null) {
+                    suggestion = m.get("suggestion").toString();
+                } else if (m.get("comment") != null) {
+                    suggestion = m.get("comment").toString();
+                }
+
+                // 目前先固定版本号为 1，后续如果有多轮纠错再扩展
+                TextCorrectionEntity entity = TextCorrectionEntity.builder()
+                        .reviewId(reviewId)
+                        .originalText(original)
+                        .correctedText(corrected)
+                        .startOffset(startOffset)
+                        .endOffset(endOffset)
+                        .errorType(errorType)
+                        .suggestion(suggestion)
+                        .revisionNo(1)
+                        .build();
+                entities.add(entity);
+            }
+
+            if (!entities.isEmpty()) {
+                reviewMapper.insertTextCorrections(entities);
+                log.info("文本纠错结果已保存，reviewId={}，行数={}", reviewId, entities.size());
+            }
+        } catch (Exception e) {
+            // 不影响主流程，只记录日志
+            log.error("调用文本纠错服务失败，reviewId={}，err={}", reviewId, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 测试文本纠错功能（不保存到数据库）
+     * 调用外部文本纠错服务，返回纠错结果列表
+     * 
+     * @param text 待纠错的文本内容
+     * @return 纠错结果列表
+     */
+    public List<TextCorrectionDTO> testTextCorrection(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            throw new IllegalArgumentException("文本内容不能为空");
+        }
+
+        // 打印当前token的剩余有效期
+        printTokenRemainingValidity();
+
+        try {
+            String url = correctServiceUrl.endsWith("/")
+                    ? correctServiceUrl + "correct"
+                    : correctServiceUrl + "/correct";
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("text", text);
+
+            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(url, requestEntity, Map.class);
+            if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
+                log.warn("文本纠错服务返回非 200 或空响应，status={}", response.getStatusCode());
+                return new ArrayList<>();
+            }
+
+            // 调试：打印完整响应（用于排查字段名问题）
+            log.debug("文本纠错服务完整响应: {}", response.getBody());
+
+            Object diffsObj = response.getBody().get("diffs");
+            if (!(diffsObj instanceof List<?> diffsList) || diffsList.isEmpty()) {
+                log.info("文本纠错服务未返回 diffs 或为空，响应体: {}", response.getBody());
+                return new ArrayList<>();
+            }
+
+            List<TextCorrectionDTO> result = new ArrayList<>();
+            for (Object o : diffsList) {
+                if (!(o instanceof Map<?, ?> m)) {
+                    continue;
+                }
+
+                // 调试：打印原始数据（仅第一条，避免日志过多）
+                if (result.isEmpty()) {
+                    log.debug("文本纠错服务返回的原始数据示例: {}", m);
+                }
+
+                // 兼容多种字段命名：lineNo/startOffset/endOffset/errorType/suggestion/comment 等
+                String original = m.get("original") != null ? m.get("original").toString() : null;
+                if (original == null && m.get("original_text") != null) {
+                    original = m.get("original_text").toString();
+                }
+                if (original == null && m.get("originalText") != null) {
+                    original = m.get("originalText").toString();
+                }
+                String corrected = m.get("corrected") != null ? m.get("corrected").toString() : null;
+                if (corrected == null && m.get("corrected_text") != null) {
+                    corrected = m.get("corrected_text").toString();
+                }
+                if (corrected == null && m.get("correctedText") != null) {
+                    corrected = m.get("correctedText").toString();
+                }
+
+                // 至少要有原文或改后文本才返回
+                if (original == null && corrected == null) {
+                    continue;
+                }
+
+                // 解析起始位置：支持多种字段名
+                Integer startOffset = null;
+                Object startObj = m.get("startOffset");
+                if (startObj == null) startObj = m.get("start_offset");
+                if (startObj == null) startObj = m.get("start");
+                if (startObj == null) startObj = m.get("startPos");
+                if (startObj == null) startObj = m.get("start_pos");
+                if (startObj instanceof Number) {
+                    startOffset = ((Number) startObj).intValue();
+                } else if (startObj instanceof String s && !s.trim().isEmpty()) {
+                    try {
+                        startOffset = Integer.parseInt(s.trim());
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                // 解析结束位置：支持多种字段名
+                Integer endOffset = null;
+                Object endObj = m.get("endOffset");
+                if (endObj == null) endObj = m.get("end_offset");
+                if (endObj == null) endObj = m.get("end");
+                if (endObj == null) endObj = m.get("endPos");
+                if (endObj == null) endObj = m.get("end_pos");
+                if (endObj instanceof Number) {
+                    endOffset = ((Number) endObj).intValue();
+                } else if (endObj instanceof String s && !s.trim().isEmpty()) {
+                    try {
+                        endOffset = Integer.parseInt(s.trim());
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                // 解析错误类型：支持多种字段名
+                String errorType = null;
+                if (m.get("errorType") != null) {
+                    errorType = m.get("errorType").toString();
+                } else if (m.get("error_type") != null) {
+                    errorType = m.get("error_type").toString();
+                } else if (m.get("type") != null) {
+                    errorType = m.get("type").toString();
+                } else if (m.get("operation") != null) {
+                    errorType = m.get("operation").toString();
+                } else if (m.get("op") != null) {
+                    errorType = m.get("op").toString();
+                }
+
+                // 解析建议：支持多种字段名
+                String suggestion = null;
+                if (m.get("suggestion") != null) {
+                    suggestion = m.get("suggestion").toString();
+                } else if (m.get("comment") != null) {
+                    suggestion = m.get("comment").toString();
+                } else if (m.get("message") != null) {
+                    suggestion = m.get("message").toString();
+                } else if (m.get("reason") != null) {
+                    suggestion = m.get("reason").toString();
+                } else if (m.get("description") != null) {
+                    suggestion = m.get("description").toString();
+                }
+
+                TextCorrectionDTO dto = TextCorrectionDTO.builder()
+                        .originalText(original)
+                        .correctedText(corrected)
+                        .startOffset(startOffset)
+                        .endOffset(endOffset)
+                        .errorType(errorType)
+                        .suggestion(suggestion)
+                        .build();
+                result.add(dto);
+            }
+
+            log.info("文本纠错测试完成，返回 {} 条纠错结果", result.size());
+            return result;
+        } catch (Exception e) {
+            log.error("调用文本纠错服务失败，err={}", e.getMessage(), e);
+            throw new RuntimeException("文本纠错服务调用失败: " + e.getMessage(), e);
+        }
     }
 
     private BigDecimal parseTotalScore(String scoreStr) {
@@ -399,8 +754,11 @@ public class ReviewService {
             prompt.append("请按照以下评分维度进行批改，并为每个维度给出具体得分（满分见各维度说明）：\n");
             for (int i = 0; i < dimensions.size(); i++) {
                 ScoreDimensionEntity dim = dimensions.get(i);
-                prompt.append(String.format("%d. %s（满分%.2f分，权重%.2f%%）：\n",
-                        i + 1, dim.getDimensionName(), dim.getMaxScore(), dim.getWeight()));
+                String weightText = dim.getWeight() != null
+                        ? String.format("%.2f", dim.getWeight())
+                        : "0.00";
+                prompt.append(String.format("%d. %s（满分%.2f分，权重%s%%）：\n",
+                        i + 1, dim.getDimensionName(), dim.getMaxScore(), weightText));
             }
             prompt.append("\n请在每个维度的评价后，明确标注该维度的得分，格式为：【维度名称得分：XX分】\n");
         } else {
@@ -503,5 +861,71 @@ public class ReviewService {
             return null;
         }
         return text.substring(start, end).trim();
+    }
+
+    /**
+     * 打印当前token的剩余有效期
+     */
+    private void printTokenRemainingValidity() {
+        log.info("========== 开始检查Token剩余有效期 ==========");
+        try {
+            // 获取当前请求
+            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attributes == null) {
+                log.warn("【Token状态】无法获取当前请求(RequestContextHolder.getRequestAttributes()返回null)，无法打印token剩余有效期");
+                log.info("========== Token检查结束 ==========");
+                return;
+            }
+
+            HttpServletRequest request = attributes.getRequest();
+            String headerName = jwtProperties.getHeaderName();
+            String header = request.getHeader(headerName);
+            
+            log.info("【调试信息】请求头名称: {}, 请求头值是否存在: {}", headerName, header != null);
+            if (request != null) {
+                log.info("【调试信息】请求URI: {}", request.getRequestURI());
+            }
+
+            // 检查是否有token
+            if (header == null || !header.startsWith(jwtProperties.getTokenPrefix())) {
+                log.info("【Token状态】当前请求没有token，无法打印剩余有效期");
+                if (header != null) {
+                    log.info("【调试信息】请求头值(前50字符): {}...", header.substring(0, Math.min(50, header.length())));
+                }
+                log.info("========== Token检查结束 ==========");
+                return;
+            }
+
+            // 提取token
+            String token = header.substring(jwtProperties.getTokenPrefix().length()).trim();
+            log.info("【调试信息】Token已提取，长度: {}", token.length());
+
+            // 解析token获取过期时间
+            Claims claims = jwtUtil.parseToken(token);
+            Date expiration = claims.getExpiration();
+            Date now = new Date();
+
+            // 计算剩余有效期（毫秒）
+            long remainingMillis = expiration.getTime() - now.getTime();
+
+            if (remainingMillis <= 0) {
+                log.warn("【Token状态】当前token已过期！过期时间: {}", expiration);
+            } else {
+                // 转换为更易读的格式
+                long days = TimeUnit.MILLISECONDS.toDays(remainingMillis);
+                long hours = TimeUnit.MILLISECONDS.toHours(remainingMillis) % 24;
+                long minutes = TimeUnit.MILLISECONDS.toMinutes(remainingMillis) % 60;
+                long seconds = TimeUnit.MILLISECONDS.toSeconds(remainingMillis) % 60;
+
+                String remainingTime = String.format("%d天 %d小时 %d分钟 %d秒", days, hours, minutes, seconds);
+                log.info("【Token剩余有效期】{}", remainingTime);
+                log.info("【Token过期时间】{}", expiration);
+                log.info("【Token剩余毫秒数】{}", remainingMillis);
+            }
+        } catch (Exception e) {
+            log.error("【Token状态】打印token剩余有效期时发生错误: {}", e.getMessage(), e);
+            log.error("异常堆栈:", e);
+        }
+        log.info("========== Token检查结束 ==========");
     }
 }

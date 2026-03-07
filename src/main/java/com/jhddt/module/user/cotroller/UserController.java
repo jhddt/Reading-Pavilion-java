@@ -54,7 +54,7 @@ public class UserController {
             ),
             @ApiResponse(responseCode = "500", description = "登录失败，用户名或密码错误")
     })
-    @PostMapping("/login")
+    @PostMapping(value = "/login", consumes = "application/json", produces = "application/json")
     public Result<LoginResponse> login(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "登录请求参数",
@@ -109,7 +109,7 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "注册成功"),
             @ApiResponse(responseCode = "500", description = "注册失败，用户名已存在或其他错误")
     })
-    @PostMapping("/add")
+    @PostMapping(value = "/add", consumes = "application/json", produces = "application/json")
     public Result<Void> addUser(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(
                     description = "用户信息（id、createTime、updateTime、status 由系统自动生成，无需填写）",
@@ -164,7 +164,7 @@ public class UserController {
             @ApiResponse(responseCode = "200", description = "修改成功"),
             @ApiResponse(responseCode = "500", description = "修改失败，用户名已存在或其他错误")
     })
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = "application/json", produces = "application/json")
     public Result<Void> updateUser(
             @Parameter(description = "用户ID", required = true, example = "1") 
             @PathVariable Long id,

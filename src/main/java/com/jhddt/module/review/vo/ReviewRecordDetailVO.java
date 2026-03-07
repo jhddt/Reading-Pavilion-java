@@ -33,6 +33,12 @@ public class ReviewRecordDetailVO {
     private Long essayId;
 
     /**
+     * 作文标题（方便前端直接展示是哪一篇作文）
+     */
+    @Schema(description = "作文标题")
+    private String essayTitle;
+
+    /**
      * 评审者类型：0-AI，1-教师
      */
     @Schema(description = "评审者类型：0-AI，1-教师")
