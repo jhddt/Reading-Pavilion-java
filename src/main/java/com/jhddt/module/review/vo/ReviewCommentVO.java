@@ -37,6 +37,24 @@ public class ReviewCommentVO {
     private String content;
 
     /**
+     * 关联文本起始位置（字符索引）
+     */
+    @Schema(description = "关联文本起始位置")
+    private Integer startOffset;
+
+    /**
+     * 关联文本结束位置（字符索引）
+     */
+    @Schema(description = "关联文本结束位置")
+    private Integer endOffset;
+
+    /**
+     * 关联的原文片段
+     */
+    @Schema(description = "关联的原文片段")
+    private String relatedText;
+
+    /**
      * 创建时间
      */
     @Schema(description = "创建时间")

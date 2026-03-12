@@ -127,4 +127,59 @@ public class FileDownloadController {
 
         return Result.success("生成成功", url);
     }
+
+    @Operation(
+            summary = "通过文件路径获取访问链接",
+            description = "根据文件路径生成临时访问链接（默认有效期7天），用于预览图片"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "生成成功"),
+            @ApiResponse(responseCode = "500", description = "文件路径无效")
+    })
+    @GetMapping("/url/path")
+    public Result<String> getFileUrlByPath(
+            @Parameter(description = "文件路径", required = true, example = "essay/images/1_20260227_abc123.jpg")
+            @RequestParam String filePath,
+            @Parameter(description = "链接有效期（秒），默认7天", example = "604800")
+            @RequestParam(defaultValue = "604800") Integer expirySeconds,
+            Authentication authentication) {
+
+        if (filePath == null || filePath.isEmpty()) {
+            return Result.error("文件路径不能为空");
+        }
+
+        try {
+            // 生成访问链接
+            String url = fileStorageService.getFileUrl(filePath, expirySeconds);
+            return Result.success("生成成功", url);
+        } catch (Exception e) {
+            return Result.error("生成链接失败: " + e.getMessage());
+        }
+    }
+
+    @Operation(
+            summary = "获取作文的所有文件",
+            description = "根据作文ID获取该作文的所有上传文件列表"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "查询成功"),
+            @ApiResponse(responseCode = "403", description = "无权访问")
+    })
+    @GetMapping("/essay/{essayId}")
+    public Result<java.util.List<FileEntity>> getFilesByEssayId(
+            @Parameter(description = "作文ID", required = true, example = "1")
+            @PathVariable Long essayId,
+            Authentication authentication) {
+
+        Long userId = (Long) authentication.getPrincipal();
+
+        try {
+            java.util.List<FileEntity> files = fileService.getByEssayId(essayId, userId);
+            return Result.success(files);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("查询失败: " + e.getMessage());
+        }
+    }
 }

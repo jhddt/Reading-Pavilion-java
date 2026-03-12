@@ -6,6 +6,7 @@ import com.jhddt.module.review.entity.ReviewRecordEntity;
 import com.jhddt.module.review.entity.ReviewScoreEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
 import com.jhddt.module.review.entity.TextCorrectionEntity;
+import com.jhddt.module.review.vo.ReviewRecordVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -36,6 +37,13 @@ public interface ReviewMapper {
     List<ReviewRecordEntity> selectReviewRecordsPage(Page<ReviewRecordEntity> page,
                                                      @Param("status") Integer status,
                                                      @Param("reviewerType") Integer reviewerType);
+
+    List<ReviewRecordVO> selectReviewRecordsPageByUserId(Page<ReviewRecordVO> page,
+                                                          @Param("status") Integer status,
+                                                          @Param("reviewerType") Integer reviewerType,
+                                                          @Param("userId") Long userId);
+
+    int deleteReviewRecordLogic(@Param("reviewId") Long reviewId);
 
     // =========================
     // review_score
@@ -76,5 +84,7 @@ public interface ReviewMapper {
     // =========================
 
     int insertTextCorrections(@Param("list") List<TextCorrectionEntity> list);
+
+    List<TextCorrectionEntity> selectTextCorrectionsByReviewId(@Param("reviewId") Long reviewId);
 }
 

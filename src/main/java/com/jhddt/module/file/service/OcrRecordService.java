@@ -12,4 +12,9 @@ public interface OcrRecordService extends IService<OcrRecordEntity> {
      * 获取作文的最新OCR记录
      */
     OcrRecordEntity getLatestByEssayId(Long essayId);
+    
+    /**
+     * 根据文件ID获取OCR记录
+     */
+    OcrRecordEntity getByFileId(Long fileId);
 }

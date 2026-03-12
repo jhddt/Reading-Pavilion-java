@@ -1,5 +1,6 @@
 package com.jhddt.module.review.vo;
 
+import com.jhddt.module.review.dto.TextCorrectionDTO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -103,4 +104,10 @@ public class ReviewRecordDetailVO {
      */
     @Schema(description = "评论列表")
     private List<ReviewCommentVO> comments;
+
+    /**
+     * 文本纠错列表
+     */
+    @Schema(description = "文本纠错列表")
+    private List<TextCorrectionDTO> textCorrections;
 }

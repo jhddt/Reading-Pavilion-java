@@ -120,6 +120,7 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw new RuntimeException("文件不能为空");
         }
 
+        InputStream inputStream = null;
         try {
             // 生成文件名：userId_yyyyMMdd_uuid.ext
             String originalFilename = file.getOriginalFilename();
@@ -133,12 +134,16 @@ public class FileStorageServiceImpl implements FileStorageService {
             // MinIO 对象路径
             String objectName = subPath + "/" + filename;
 
-            // 上传到 MinIO
+            // 获取输入流
+            inputStream = file.getInputStream();
+            long fileSize = file.getSize();
+            
+            // 上传到 MinIO，设置合理的分片大小
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .bucket(minioConfig.getBucketName())
                             .object(objectName)
-                            .stream(file.getInputStream(), file.getSize(), -1)
+                            .stream(inputStream, fileSize, 10485760) // 10MB 分片大小
                             .contentType(file.getContentType())
                             .build()
             );
@@ -146,7 +151,15 @@ public class FileStorageServiceImpl implements FileStorageService {
             // 返回访问路径
             return objectName;
         } catch (Exception e) {
-            throw new RuntimeException("文件上传失败: " + e.getMessage());
+            throw new RuntimeException("文件上传失败: " + e.getMessage() + "。请检查MinIO服务是否正常运行。");
+        } finally {
+            // 确保关闭输入流
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (Exception ignored) {
+                }
+            }
         }
     }
 }

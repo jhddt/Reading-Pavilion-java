@@ -2,7 +2,7 @@ spring:
   datasource:
     # MySQL 8
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/essay_system_v2?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+    url: jdbc:mysql://localhost:3306/essay_system_v3?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
     username: root
     password: 1234
 
@@ -50,7 +50,7 @@ spring:
 
 # MinIO 配置
 minio:
-  endpoint: http://192.168.41.128:9000
+  endpoint: http://localhost:9000
   access-key: admin
   secret-key: 12345678
   bucket-name: essayandfile
@@ -59,6 +59,13 @@ minio:
 ocr:
   service:
     url: http://0.0.0.0:8000  # FastAPI OCR 服务地址
+
+# 文本纠错服务配置
+correct:
+  service:
+    url: http://127.0.0.1:8001  # 文本纠错服务地址
+    enabled: true  # 是否启用文本纠错服务
+    timeout: 60000  # 超时时间（毫秒），默认60秒
 
 # DeepSeek API 配置（保留用于兼容，已迁移到 SpringAI）
 deepseek:
@@ -85,5 +92,16 @@ review:
 # 日志配置（生产环境建议改为 INFO）
 logging:
   level:
-    com.jhddt: INFO
+    com.jhddt: info  # 临时改为 DEBUG 以便排查文本纠错问题
+    com.jhddt.module.review.service.ReviewService: DEBUG
+    com.jhddt.module.review.mapper: DEBUG  # 添加 Mapper 日志
     org.springframework.security: WARN
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # 打印 SQL 语句
+
+# JWT 配置
+jwt:
+  expiration: 7200000  # Token 过期时间（毫秒），2小时 = 2 * 60 * 60 * 1000

@@ -3,7 +3,10 @@ package com.jhddt.module.file.controller;
 import com.jhddt.common.result.Result;
 import com.jhddt.module.essay.service.MinioService;
 import com.jhddt.module.file.entity.OcrRecordEntity;
+import com.jhddt.module.file.entity.OcrTextBlockEntity;
+import com.jhddt.module.file.mapper.OcrTextBlockMapper;
 import com.jhddt.module.file.service.OcrRecordService;
+import com.jhddt.module.file.vo.OcrRecordDetailVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -16,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,6 +33,7 @@ public class OcrController {
 
     private final OcrRecordService ocrRecordService;
     private final MinioService minioService;
+    private final OcrTextBlockMapper ocrTextBlockMapper;
 
     /**
      * 获取 OCR 记录详情
@@ -53,6 +58,52 @@ public class OcrController {
         }
 
         return Result.success(ocrRecord);
+    }
+
+    /**
+     * 获取 OCR 记录详情（包含文本块位置信息）
+     */
+    @Operation(
+            summary = "获取OCR记录详情（含文本块）", 
+            description = "根据OCR记录ID查询详细信息，包括文本块位置信息，用于在图片上标注"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "查询成功"),
+            @ApiResponse(responseCode = "500", description = "OCR记录不存在")
+    })
+    @GetMapping("/{ocrId}/detail")
+    public Result<OcrRecordDetailVO> getOcrRecordDetail(
+            @Parameter(description = "OCR记录ID", required = true, example = "1") 
+            @PathVariable Long ocrId,
+            Authentication authentication) {
+        
+        OcrRecordEntity ocrRecord = ocrRecordService.getById(ocrId);
+        if (ocrRecord == null) {
+            return Result.error("OCR记录不存在");
+        }
+
+        // 查询文本块列表
+        List<OcrTextBlockEntity> textBlocks = ocrTextBlockMapper.selectByOcrId(ocrId);
+
+        // 构建 VO
+        OcrRecordDetailVO vo = OcrRecordDetailVO.builder()
+                .ocrId(ocrRecord.getOcrId())
+                .essayId(ocrRecord.getEssayId())
+                .fileId(ocrRecord.getFileId())
+                .version(ocrRecord.getVersion())
+                .isLatest(ocrRecord.getIsLatest())
+                .ocrText(ocrRecord.getOcrText())
+                .resultImagePath(ocrRecord.getResultImagePath())
+                .accuracy(ocrRecord.getAccuracy())
+                .engine(ocrRecord.getEngine())
+                .imageWidth(ocrRecord.getImageWidth())
+                .imageHeight(ocrRecord.getImageHeight())
+                .totalTextBlocks(ocrRecord.getTotalTextBlocks())
+                .createTime(ocrRecord.getCreateTime())
+                .textBlocks(textBlocks)
+                .build();
+
+        return Result.success(vo);
     }
 
     /**
@@ -111,6 +162,31 @@ public class OcrController {
         OcrRecordEntity ocrRecord = ocrRecordService.getLatestByEssayId(essayId);
         if (ocrRecord == null) {
             return Result.error("该作文没有OCR记录");
+        }
+
+        return Result.success(ocrRecord);
+    }
+
+    /**
+     * 根据文件ID获取OCR记录
+     */
+    @Operation(
+            summary = "根据文件ID获取OCR记录", 
+            description = "根据文件ID获取对应的OCR识别记录"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "查询成功"),
+            @ApiResponse(responseCode = "500", description = "该文件没有OCR记录")
+    })
+    @GetMapping("/file/{fileId}")
+    public Result<OcrRecordEntity> getOcrByFileId(
+            @Parameter(description = "文件ID", required = true, example = "1") 
+            @PathVariable Long fileId,
+            Authentication authentication) {
+        
+        OcrRecordEntity ocrRecord = ocrRecordService.getByFileId(fileId);
+        if (ocrRecord == null) {
+            return Result.error("该文件没有OCR记录");
         }
 
         return Result.success(ocrRecord);

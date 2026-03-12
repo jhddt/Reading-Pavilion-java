@@ -47,6 +47,27 @@ public class ReviewCommentEntity {
     private String content;
 
     /**
+     * 关联文本起始位置（字符索引）
+     */
+    @Schema(description = "关联文本起始位置")
+    @TableField("start_offset")
+    private Integer startOffset;
+
+    /**
+     * 关联文本结束位置（字符索引）
+     */
+    @Schema(description = "关联文本结束位置")
+    @TableField("end_offset")
+    private Integer endOffset;
+
+    /**
+     * 关联的原文片段
+     */
+    @Schema(description = "关联的原文片段")
+    @TableField("related_text")
+    private String relatedText;
+
+    /**
      * 生成时间
      */
     @Schema(description = "生成时间", accessMode = Schema.AccessMode.READ_ONLY)

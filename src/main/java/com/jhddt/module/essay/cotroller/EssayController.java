@@ -10,6 +10,8 @@ import com.jhddt.module.essay.entity.EssayEntity;
 import com.jhddt.module.essay.service.*;
 import com.jhddt.module.file.entity.FileEntity;
 import com.jhddt.module.file.entity.OcrRecordEntity;
+import com.jhddt.module.file.entity.OcrTextBlockEntity;
+import com.jhddt.module.file.mapper.OcrTextBlockMapper;
 import com.jhddt.module.file.service.FileService;
 import com.jhddt.module.file.service.OcrRecordService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -27,6 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Tag(name = "作文管理", description = "作文相关接口")
 @RestController
 @RequestMapping("/essay")
@@ -39,6 +44,7 @@ public class EssayController {
     private final DocumentParserService documentParserService;
     private final FileService fileService;
     private final OcrRecordService ocrRecordService;
+    private final OcrTextBlockMapper ocrTextBlockMapper;
 
     /**
      * 1. 纯文本创建草稿
@@ -224,7 +230,54 @@ public class EssayController {
                     .accuracy(ocrResult.getAccuracy())
                     .engine("PaddleOCR")
                     .build();
+            
+            // 保存图片尺寸信息
+            if (ocrResult.getImageInfo() != null) {
+                ocrRecord.setImageWidth(ocrResult.getImageInfo().getWidth());
+                ocrRecord.setImageHeight(ocrResult.getImageInfo().getHeight());
+                ocrRecord.setTotalTextBlocks(ocrResult.getImageInfo().getTotalTextBlocks());
+            }
+            
             ocrRecordService.save(ocrRecord);
+
+            // 2.6 保存文本块位置信息
+            if (ocrResult.getTextBlocks() != null && !ocrResult.getTextBlocks().isEmpty()) {
+                List<OcrTextBlockEntity> textBlocks = new ArrayList<>();
+                for (OcrResult.TextBlock block : ocrResult.getTextBlocks()) {
+                    OcrTextBlockEntity blockEntity = OcrTextBlockEntity.builder()
+                            .ocrId(ocrRecord.getOcrId())
+                            .blockIndex(block.getId())
+                            .text(block.getText())
+                            .confidence(block.getConfidence())
+                            .build();
+                    
+                    if (block.getBox() != null) {
+                        // 将 points 转为 JSON 字符串保存
+                        try {
+                            blockEntity.setPoints(new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .writeValueAsString(block.getBox().getPoints()));
+                        } catch (Exception e) {
+                            // 忽略序列化错误
+                        }
+                        
+                        blockEntity.setXMin(block.getBox().getXMin());
+                        blockEntity.setYMin(block.getBox().getYMin());
+                        blockEntity.setXMax(block.getBox().getXMax());
+                        blockEntity.setYMax(block.getBox().getYMax());
+                        blockEntity.setWidth(block.getBox().getWidth());
+                        blockEntity.setHeight(block.getBox().getHeight());
+                        blockEntity.setCenterX(block.getBox().getCenterX());
+                        blockEntity.setCenterY(block.getBox().getCenterY());
+                    }
+                    
+                    textBlocks.add(blockEntity);
+                }
+                
+                // 批量插入文本块
+                if (!textBlocks.isEmpty()) {
+                    ocrTextBlockMapper.insertBatch(textBlocks);
+                }
+            }
         }
 
         String finalText = mergedText.toString();
@@ -443,7 +496,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "提交成功"),
             @ApiResponse(responseCode = "500", description = "提交失败，可能原因：作文不存在、无权操作、非草稿状态等")
     })
-    @PutMapping(value = "/{id}/submit", consumes = "application/json", produces = "application/json")
+    @PutMapping(value = "/{id}/submit", produces = "application/json")
     public Result<Void> submitEssay(
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long id,
@@ -469,7 +522,7 @@ public class EssayController {
             @ApiResponse(responseCode = "200", description = "撤回成功"),
             @ApiResponse(responseCode = "500", description = "撤回失败，可能原因：作文不存在、无权操作、非已提交状态等")
     })
-    @PutMapping(value = "/{id}/withdraw", consumes = "application/json", produces = "application/json")
+    @PutMapping(value = "/{id}/withdraw", produces = "application/json")
     public Result<Void> withdrawEssay(
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long id,

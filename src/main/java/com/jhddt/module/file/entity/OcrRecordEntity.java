@@ -49,11 +49,23 @@ public class OcrRecordEntity {
 
     @Schema(description = "识别准确率", example = "95.5")
     @TableField("accuracy")
-    private BigDecimal accuracy;
+    private Double accuracy;
 
     @Schema(description = "OCR引擎", example = "PaddleOCR")
     @TableField("engine")
     private String engine;
+
+    @Schema(description = "图片宽度")
+    @TableField("image_width")
+    private Integer imageWidth;
+
+    @Schema(description = "图片高度")
+    @TableField("image_height")
+    private Integer imageHeight;
+
+    @Schema(description = "文本块总数")
+    @TableField("total_text_blocks")
+    private Integer totalTextBlocks;
 
     @Schema(description = "识别时间", accessMode = Schema.AccessMode.READ_ONLY)
     @TableField(value = "create_time", fill = FieldFill.INSERT)

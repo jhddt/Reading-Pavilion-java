@@ -13,12 +13,14 @@ import com.jhddt.module.review.entity.TextCorrectionEntity;
 import com.jhddt.module.review.mapper.ReviewMapper;
 import com.jhddt.module.review.vo.ReviewCommentVO;
 import com.jhddt.module.review.vo.ReviewRecordDetailVO;
+import com.jhddt.module.review.vo.ReviewRecordVO;
 import com.jhddt.module.review.vo.ReviewScoreVO;
 import com.jhddt.common.util.JwtUtil;
 import com.jhddt.config.security.JwtProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -55,7 +57,8 @@ public class ReviewService {
     private final ChatClient chatClient;
     private final ReviewMapper reviewMapper;
     private final EssayService essayService;
-    private final RestTemplate restTemplate;
+    @Qualifier("correctServiceRestTemplate")
+    private final RestTemplate correctServiceRestTemplate;
     private final JwtUtil jwtUtil;
     private final JwtProperties jwtProperties;
 
@@ -126,17 +129,21 @@ public class ReviewService {
     }
 
     /**
-     * 异步执行批改逻辑
+     * 异步执行批改逻辑（包含文本纠错）
      */
     @Async
     public void doReviewAsync(Long reviewId, Long essayId, String essayContent, String prompt, String essayTitle) {
         try {
             log.info("开始异步批改，reviewId={}, essayId={}", reviewId, essayId);
 
-            // 1) 调用文本纠错服务，按行保存 diffs（不影响主流程，失败仅记录日志）
-            callTextCorrectionAndSave(reviewId, essayContent);
+            // 1) 先调用文本纠错服务并保存（不影响主流程，失败仅记录日志）
+            try {
+                callTextCorrectionAndSave(reviewId, essayContent);
+            } catch (Exception e) {
+                log.error("文本纠错失败，但不影响批改流程，reviewId={}, error={}", reviewId, e.getMessage(), e);
+            }
 
-            // 2) 调用 AI
+            // 2) 调用 AI 批改
             ReviewResult aiResult = callAi(prompt);
 
             // 3) 保存各维度得分（先保存，用于计算总分）
@@ -158,8 +165,8 @@ public class ReviewService {
                     .build();
             reviewMapper.updateReviewRecordById(record);
 
-            // 6) 保存评论（总评/建议/修改意见）
-            saveComments(reviewId, aiResult.getReviewContent());
+            // 6) 保存评论（总评/建议/修改意见），并填充位置信息
+            saveCommentsWithPosition(reviewId, aiResult.getReviewContent(), essayContent);
 
             log.info("异步批改完成，reviewId={}, essayId={}, totalScore={}", reviewId, essayId, totalScore);
         } catch (Exception e) {
@@ -175,14 +182,99 @@ public class ReviewService {
         }
     }
 
-    public ReviewRecordDetailVO getReviewDetail(Long reviewId) {
+    /**
+     * 对作文进行文本纠错并保存到数据库
+     * @param essayId 作文ID
+     * @param reviewId 评审记录ID（可选，如果不提供则创建新的评审记录）
+     * @param userId 用户ID
+     * @return 包含 reviewId 和 correctionCount 的 Map
+     */
+    public Map<String, Object> correctEssay(Long essayId, Long reviewId, Long userId) {
+        // 1) 查询作文并校验归属
+        EssayEntity essay = essayService.getById(essayId);
+        if (essay == null) {
+            throw new IllegalArgumentException("作文不存在");
+        }
+        if (userId != null && essay.getUserId() != null && !Objects.equals(essay.getUserId(), userId)) {
+            throw new IllegalArgumentException("无权操作此作文");
+        }
+
+        // 2) 获取作文内容
+        String essayContent = essay.getFinalContent();
+        if (essayContent == null || essayContent.trim().isEmpty()) {
+            essayContent = essay.getOriginalContent();
+        }
+        if (essayContent == null || essayContent.trim().isEmpty()) {
+            throw new IllegalArgumentException("作文内容为空，无法纠错");
+        }
+
+        // 3) 如果没有提供 reviewId，创建一个新的评审记录
+        if (reviewId == null) {
+            LocalDateTime startTime = LocalDateTime.now();
+            ReviewRecordEntity record = ReviewRecordEntity.builder()
+                    .essayId(essayId)
+                    .reviewerType(0)
+                    .ruleVersion("文本纠错")
+                    .modelVersion("text-correction-service")
+                    .startTime(startTime)
+                    .status(1) // PROCESSING
+                    .retryCount(0)
+                    .build();
+            reviewMapper.insertReviewRecord(record);
+            reviewId = record.getReviewId();
+            log.info("创建新的评审记录用于文本纠错，reviewId={}, essayId={}", reviewId, essayId);
+        } else {
+            // 验证 reviewId 是否存在且属于该作文
+            ReviewRecordEntity existingRecord = reviewMapper.selectReviewRecordById(reviewId);
+            if (existingRecord == null) {
+                throw new IllegalArgumentException("评审记录不存在");
+            }
+            if (!existingRecord.getEssayId().equals(essayId)) {
+                throw new IllegalArgumentException("评审记录与作文不匹配");
+            }
+            // 验证权限
+            if (userId != null) {
+                EssayEntity recordEssay = essayService.getById(existingRecord.getEssayId());
+                if (recordEssay == null || !recordEssay.getUserId().equals(userId)) {
+                    throw new IllegalArgumentException("无权访问此评审记录");
+                }
+            }
+        }
+
+        // 4) 调用文本纠错服务并保存
+        callTextCorrectionAndSave(reviewId, essayContent);
+
+        // 5) 查询保存的纠错记录数量
+        List<TextCorrectionEntity> corrections = reviewMapper.selectTextCorrectionsByReviewId(reviewId);
+        int correctionCount = corrections.size();
+
+        // 6) 返回结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("reviewId", reviewId);
+        result.put("essayId", essayId);
+        result.put("correctionCount", correctionCount);
+        
+        log.info("文本纠错完成，reviewId={}, essayId={}, correctionCount={}", reviewId, essayId, correctionCount);
+        return result;
+    }
+
+    public ReviewRecordDetailVO getReviewDetail(Long reviewId, Long userId) {
         ReviewRecordEntity record = reviewMapper.selectReviewRecordById(reviewId);
         if (record == null) {
             return null;
         }
 
+        // 验证权限：检查作文是否属于当前用户
+        if (record.getEssayId() != null && userId != null) {
+            EssayEntity essay = essayService.getById(record.getEssayId());
+            if (essay == null || !essay.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("无权访问此评审记录");
+            }
+        }
+
         List<ReviewScoreEntity> scores = reviewMapper.selectScoresByReviewId(reviewId);
         List<ReviewCommentEntity> comments = reviewMapper.selectCommentsByReviewId(reviewId);
+        List<TextCorrectionEntity> corrections = reviewMapper.selectTextCorrectionsByReviewId(reviewId);
 
         // dimensionId -> name
         Map<Long, String> dimNameMap = reviewMapper.selectAllDimensions().stream()
@@ -203,7 +295,21 @@ public class ReviewService {
                         .commentId(c.getCommentId())
                         .commentType(c.getCommentType())
                         .content(c.getContent())
+                        .startOffset(c.getStartOffset())
+                        .endOffset(c.getEndOffset())
+                        .relatedText(c.getRelatedText())
                         .createTime(c.getCreateTime())
+                        .build())
+                .toList();
+
+        List<TextCorrectionDTO> correctionDTOs = corrections.stream()
+                .map(tc -> TextCorrectionDTO.builder()
+                        .originalText(tc.getOriginalText())
+                        .correctedText(tc.getCorrectedText())
+                        .startOffset(tc.getStartOffset())
+                        .endOffset(tc.getEndOffset())
+                        .errorType(tc.getErrorType())
+                        .suggestion(tc.getSuggestion())
                         .build())
                 .toList();
 
@@ -231,18 +337,47 @@ public class ReviewService {
                 .essayTitle(essayTitle)
                 .scores(scoreVOs)
                 .comments(commentVOs)
+                .textCorrections(correctionDTOs)
                 .build();
     }
 
-    public List<ReviewRecordEntity> listByEssayId(Long essayId) {
+    public List<ReviewRecordEntity> listByEssayId(Long essayId, Long userId) {
+        // 验证权限：检查作文是否属于当前用户
+        if (essayId != null && userId != null) {
+            EssayEntity essay = essayService.getById(essayId);
+            if (essay == null || !essay.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("无权访问此作文的评审记录");
+            }
+        }
         return reviewMapper.selectReviewRecordsByEssayId(essayId);
     }
 
-    public Page<ReviewRecordEntity> pageRecords(Integer page, Integer pageSize, Integer status, Integer reviewerType) {
-        Page<ReviewRecordEntity> p = new Page<>(page, pageSize);
-        List<ReviewRecordEntity> records = reviewMapper.selectReviewRecordsPage(p, status, reviewerType);
+    public Page<ReviewRecordVO> pageRecords(Integer page, Integer pageSize, Integer status, Integer reviewerType, Long userId) {
+        Page<ReviewRecordVO> p = new Page<>(page, pageSize);
+        List<ReviewRecordVO> records = reviewMapper.selectReviewRecordsPageByUserId(p, status, reviewerType, userId);
         p.setRecords(records);
         return p;
+    }
+
+    public boolean deleteReviewRecord(Long reviewId, Long userId) {
+        if (reviewId == null) {
+            throw new IllegalArgumentException("reviewId 不能为空");
+        }
+        
+        // 验证权限：检查评审记录对应的作文是否属于当前用户
+        ReviewRecordEntity record = reviewMapper.selectReviewRecordById(reviewId);
+        if (record == null) {
+            return false;
+        }
+        
+        if (record.getEssayId() != null && userId != null) {
+            EssayEntity essay = essayService.getById(record.getEssayId());
+            if (essay == null || !essay.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("无权删除此评审记录");
+            }
+        }
+        
+        return reviewMapper.deleteReviewRecordLogic(reviewId) > 0;
     }
 
     // =========================
@@ -335,12 +470,17 @@ public class ReviewService {
      */
     private void callTextCorrectionAndSave(Long reviewId, String essayContent) {
         if (reviewId == null || essayContent == null || essayContent.trim().isEmpty()) {
+            log.warn("文本纠错跳过：reviewId={}, essayContent为空={}", reviewId, essayContent == null || essayContent.trim().isEmpty());
             return;
         }
         try {
+            log.info("开始调用文本纠错服务，reviewId={}, 作文内容长度={}", reviewId, essayContent.length());
+            
             String url = correctServiceUrl.endsWith("/")
                     ? correctServiceUrl + "correct"
                     : correctServiceUrl + "/correct";
+
+            log.info("文本纠错服务URL: {}", url);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -350,41 +490,60 @@ public class ReviewService {
 
             HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, requestEntity, Map.class);
+            log.info("正在发送请求到文本纠错服务...");
+            ResponseEntity<Map> response = correctServiceRestTemplate.postForEntity(url, requestEntity, Map.class);
+            log.info("文本纠错服务响应状态: {}", response.getStatusCode());
+            
             if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
-                log.warn("文本纠错服务返回非 200 或空响应，status={}", response.getStatusCode());
+                log.warn("文本纠错服务返回非 200 或空响应，status={}, body={}", response.getStatusCode(), response.getBody());
                 return;
             }
 
+            log.info("文本纠错服务完整响应: {}", response.getBody());
+
             Object diffsObj = response.getBody().get("diffs");
             if (!(diffsObj instanceof List<?> diffsList) || diffsList.isEmpty()) {
-                log.info("文本纠错服务未返回 diffs 或为空，reviewId={}", reviewId);
+                log.warn("文本纠错服务未返回 diffs 或为空，reviewId={}, 响应体: {}", reviewId, response.getBody());
                 return;
             }
+
+            log.info("文本纠错服务返回 {} 条纠错记录", diffsList.size());
 
             List<TextCorrectionEntity> entities = new ArrayList<>();
             for (Object o : diffsList) {
                 if (!(o instanceof Map<?, ?> m)) {
+                    log.warn("跳过非Map类型的纠错记录: {}", o);
                     continue;
                 }
+
+                log.debug("处理纠错记录，原始数据: {}", m);
 
                 // 兼容多种字段命名：lineNo/startOffset/endOffset/errorType/suggestion/comment 等
                 String original = m.get("original") != null ? m.get("original").toString() : null;
                 if (original == null && m.get("original_text") != null) {
                     original = m.get("original_text").toString();
                 }
+                if (original == null && m.get("originalText") != null) {
+                    original = m.get("originalText").toString();
+                }
+                
                 String corrected = m.get("corrected") != null ? m.get("corrected").toString() : null;
                 if (corrected == null && m.get("corrected_text") != null) {
                     corrected = m.get("corrected_text").toString();
                 }
+                if (corrected == null && m.get("correctedText") != null) {
+                    corrected = m.get("correctedText").toString();
+                }
 
                 // 至少要有原文或改后文本才写入
                 if (original == null && corrected == null) {
+                    log.warn("跳过无效纠错记录（原文和改后文本都为空）: {}", m);
                     continue;
                 }
 
                 Integer startOffset = null;
-                Object startObj = m.get("startOffset");
+                Object startObj = m.get("start");  // 优先使用 start
+                if (startObj == null) startObj = m.get("startOffset");
                 if (startObj == null) startObj = m.get("start_offset");
                 if (startObj instanceof Number) {
                     startOffset = ((Number) startObj).intValue();
@@ -396,7 +555,8 @@ public class ReviewService {
                 }
 
                 Integer endOffset = null;
-                Object endObj = m.get("endOffset");
+                Object endObj = m.get("end");  // 优先使用 end
+                if (endObj == null) endObj = m.get("endOffset");
                 if (endObj == null) endObj = m.get("end_offset");
                 if (endObj instanceof Number) {
                     endOffset = ((Number) endObj).intValue();
@@ -408,10 +568,10 @@ public class ReviewService {
                 }
 
                 String errorType = null;
-                if (m.get("errorType") != null) {
-                    errorType = m.get("errorType").toString();
-                } else if (m.get("type") != null) {
+                if (m.get("type") != null) {  // 优先使用 type
                     errorType = m.get("type").toString();
+                } else if (m.get("errorType") != null) {
+                    errorType = m.get("errorType").toString();
                 } else if (m.get("error_type") != null) {
                     errorType = m.get("error_type").toString();
                 }
@@ -422,6 +582,9 @@ public class ReviewService {
                 } else if (m.get("comment") != null) {
                     suggestion = m.get("comment").toString();
                 }
+
+                log.debug("解析结果: original={}, corrected={}, startOffset={}, endOffset={}, errorType={}, suggestion={}", 
+                    original, corrected, startOffset, endOffset, errorType, suggestion);
 
                 // 目前先固定版本号为 1，后续如果有多轮纠错再扩展
                 TextCorrectionEntity entity = TextCorrectionEntity.builder()
@@ -438,166 +601,30 @@ public class ReviewService {
             }
 
             if (!entities.isEmpty()) {
-                reviewMapper.insertTextCorrections(entities);
-                log.info("文本纠错结果已保存，reviewId={}，行数={}", reviewId, entities.size());
+                log.info("准备保存 {} 条文本纠错记录到数据库，reviewId={}", entities.size(), reviewId);
+                
+                // 打印第一条记录的详细信息用于调试
+                if (!entities.isEmpty()) {
+                    TextCorrectionEntity first = entities.get(0);
+                    log.info("第一条纠错记录详情: reviewId={}, original={}, corrected={}, startOffset={}, endOffset={}, errorType={}, suggestion={}, revisionNo={}", 
+                        first.getReviewId(), first.getOriginalText(), first.getCorrectedText(), 
+                        first.getStartOffset(), first.getEndOffset(), first.getErrorType(), 
+                        first.getSuggestion(), first.getRevisionNo());
+                }
+                
+                int insertCount = reviewMapper.insertTextCorrections(entities);
+                log.info("文本纠错结果已保存，reviewId={}，准备插入={}条，实际插入={}条", reviewId, entities.size(), insertCount);
+                
+                // 验证是否真的插入成功
+                List<TextCorrectionEntity> saved = reviewMapper.selectTextCorrectionsByReviewId(reviewId);
+                log.info("验证插入结果：从数据库查询到 {} 条纠错记录", saved.size());
+            } else {
+                log.warn("没有有效的文本纠错记录需要保存，reviewId={}", reviewId);
             }
         } catch (Exception e) {
             // 不影响主流程，只记录日志
             log.error("调用文本纠错服务失败，reviewId={}，err={}", reviewId, e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 测试文本纠错功能（不保存到数据库）
-     * 调用外部文本纠错服务，返回纠错结果列表
-     * 
-     * @param text 待纠错的文本内容
-     * @return 纠错结果列表
-     */
-    public List<TextCorrectionDTO> testTextCorrection(String text) {
-        if (text == null || text.trim().isEmpty()) {
-            throw new IllegalArgumentException("文本内容不能为空");
-        }
-
-        // 打印当前token的剩余有效期
-        printTokenRemainingValidity();
-
-        try {
-            String url = correctServiceUrl.endsWith("/")
-                    ? correctServiceUrl + "correct"
-                    : correctServiceUrl + "/correct";
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            Map<String, Object> body = new HashMap<>();
-            body.put("text", text);
-
-            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-            ResponseEntity<Map> response = restTemplate.postForEntity(url, requestEntity, Map.class);
-            if (response.getStatusCode() != HttpStatus.OK || response.getBody() == null) {
-                log.warn("文本纠错服务返回非 200 或空响应，status={}", response.getStatusCode());
-                return new ArrayList<>();
-            }
-
-            // 调试：打印完整响应（用于排查字段名问题）
-            log.debug("文本纠错服务完整响应: {}", response.getBody());
-
-            Object diffsObj = response.getBody().get("diffs");
-            if (!(diffsObj instanceof List<?> diffsList) || diffsList.isEmpty()) {
-                log.info("文本纠错服务未返回 diffs 或为空，响应体: {}", response.getBody());
-                return new ArrayList<>();
-            }
-
-            List<TextCorrectionDTO> result = new ArrayList<>();
-            for (Object o : diffsList) {
-                if (!(o instanceof Map<?, ?> m)) {
-                    continue;
-                }
-
-                // 调试：打印原始数据（仅第一条，避免日志过多）
-                if (result.isEmpty()) {
-                    log.debug("文本纠错服务返回的原始数据示例: {}", m);
-                }
-
-                // 兼容多种字段命名：lineNo/startOffset/endOffset/errorType/suggestion/comment 等
-                String original = m.get("original") != null ? m.get("original").toString() : null;
-                if (original == null && m.get("original_text") != null) {
-                    original = m.get("original_text").toString();
-                }
-                if (original == null && m.get("originalText") != null) {
-                    original = m.get("originalText").toString();
-                }
-                String corrected = m.get("corrected") != null ? m.get("corrected").toString() : null;
-                if (corrected == null && m.get("corrected_text") != null) {
-                    corrected = m.get("corrected_text").toString();
-                }
-                if (corrected == null && m.get("correctedText") != null) {
-                    corrected = m.get("correctedText").toString();
-                }
-
-                // 至少要有原文或改后文本才返回
-                if (original == null && corrected == null) {
-                    continue;
-                }
-
-                // 解析起始位置：支持多种字段名
-                Integer startOffset = null;
-                Object startObj = m.get("startOffset");
-                if (startObj == null) startObj = m.get("start_offset");
-                if (startObj == null) startObj = m.get("start");
-                if (startObj == null) startObj = m.get("startPos");
-                if (startObj == null) startObj = m.get("start_pos");
-                if (startObj instanceof Number) {
-                    startOffset = ((Number) startObj).intValue();
-                } else if (startObj instanceof String s && !s.trim().isEmpty()) {
-                    try {
-                        startOffset = Integer.parseInt(s.trim());
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-
-                // 解析结束位置：支持多种字段名
-                Integer endOffset = null;
-                Object endObj = m.get("endOffset");
-                if (endObj == null) endObj = m.get("end_offset");
-                if (endObj == null) endObj = m.get("end");
-                if (endObj == null) endObj = m.get("endPos");
-                if (endObj == null) endObj = m.get("end_pos");
-                if (endObj instanceof Number) {
-                    endOffset = ((Number) endObj).intValue();
-                } else if (endObj instanceof String s && !s.trim().isEmpty()) {
-                    try {
-                        endOffset = Integer.parseInt(s.trim());
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-
-                // 解析错误类型：支持多种字段名
-                String errorType = null;
-                if (m.get("errorType") != null) {
-                    errorType = m.get("errorType").toString();
-                } else if (m.get("error_type") != null) {
-                    errorType = m.get("error_type").toString();
-                } else if (m.get("type") != null) {
-                    errorType = m.get("type").toString();
-                } else if (m.get("operation") != null) {
-                    errorType = m.get("operation").toString();
-                } else if (m.get("op") != null) {
-                    errorType = m.get("op").toString();
-                }
-
-                // 解析建议：支持多种字段名
-                String suggestion = null;
-                if (m.get("suggestion") != null) {
-                    suggestion = m.get("suggestion").toString();
-                } else if (m.get("comment") != null) {
-                    suggestion = m.get("comment").toString();
-                } else if (m.get("message") != null) {
-                    suggestion = m.get("message").toString();
-                } else if (m.get("reason") != null) {
-                    suggestion = m.get("reason").toString();
-                } else if (m.get("description") != null) {
-                    suggestion = m.get("description").toString();
-                }
-
-                TextCorrectionDTO dto = TextCorrectionDTO.builder()
-                        .originalText(original)
-                        .correctedText(corrected)
-                        .startOffset(startOffset)
-                        .endOffset(endOffset)
-                        .errorType(errorType)
-                        .suggestion(suggestion)
-                        .build();
-                result.add(dto);
-            }
-
-            log.info("文本纠错测试完成，返回 {} 条纠错结果", result.size());
-            return result;
-        } catch (Exception e) {
-            log.error("调用文本纠错服务失败，err={}", e.getMessage(), e);
-            throw new RuntimeException("文本纠错服务调用失败: " + e.getMessage(), e);
+            log.error("详细错误堆栈：", e);
         }
     }
 
@@ -737,6 +764,234 @@ public class ReviewService {
         if (!comments.isEmpty()) {
             reviewMapper.insertReviewComments(comments);
         }
+    }
+
+    /**
+     * 保存评论并填充位置信息
+     * 对于修改意见(commentType=3)和改进建议(commentType=2)，尝试从作文内容中查找对应位置
+     */
+    private void saveCommentsWithPosition(Long reviewId, String reviewContent, String essayContent) {
+        if (reviewContent == null || reviewContent.trim().isEmpty()) {
+            log.warn("保存评论跳过：reviewContent 为空，reviewId={}", reviewId);
+            return;
+        }
+        
+        log.info("开始保存评论并填充位置信息，reviewId={}, 作文内容长度={}", reviewId, essayContent != null ? essayContent.length() : 0);
+        
+        List<ReviewCommentEntity> comments = parseComments(reviewContent);
+        log.info("解析出 {} 条评论", comments.size());
+        
+        // 为每个评论填充位置信息
+        for (ReviewCommentEntity comment : comments) {
+            comment.setReviewId(reviewId);
+            
+            log.debug("处理评论：commentType={}, content长度={}", comment.getCommentType(), 
+                comment.getContent() != null ? comment.getContent().length() : 0);
+            
+            // 总评(1)不需要位置信息，直接跳过
+            if (comment.getCommentType() == 1) {
+                log.debug("跳过总评，不需要位置信息");
+                continue;
+            }
+            
+            // 对于修改意见(3)和改进建议(2)，尝试提取原文并查找位置
+            try {
+                if (comment.getCommentType() == 3) {
+                    log.debug("开始提取修改意见的位置信息");
+                    // 修改意见：尝试解析 "原句 -> 修改后" 格式
+                    extractPositionFromRevision(comment, essayContent);
+                } else if (comment.getCommentType() == 2) {
+                    log.debug("开始提取改进建议的位置信息");
+                    // 改进建议：尝试从建议内容中提取引用的原文
+                    extractPositionFromSuggestion(comment, essayContent);
+                }
+                
+                if (comment.getStartOffset() != null) {
+                    log.info("成功填充位置信息：commentType={}, startOffset={}, endOffset={}, relatedText={}", 
+                        comment.getCommentType(), comment.getStartOffset(), comment.getEndOffset(), 
+                        comment.getRelatedText() != null ? comment.getRelatedText().substring(0, Math.min(20, comment.getRelatedText().length())) : null);
+                }
+            } catch (Exception e) {
+                log.error("提取位置信息失败：commentType={}, error={}", comment.getCommentType(), e.getMessage(), e);
+            }
+        }
+        
+        if (!comments.isEmpty()) {
+            reviewMapper.insertReviewComments(comments);
+            log.info("保存评论完成，reviewId={}, 评论数={}", reviewId, comments.size());
+        }
+    }
+
+    /**
+     * 从修改意见中提取位置信息
+     * 解析格式：原句 -> 修改后、原句→修改后、"原句"修改为"修改后"等
+     */
+    private void extractPositionFromRevision(ReviewCommentEntity comment, String essayContent) {
+        if (comment.getContent() == null || essayContent == null) {
+            log.debug("跳过位置提取：content 或 essayContent 为空");
+            return;
+        }
+        
+        String content = comment.getContent();
+        log.info("========== 开始提取修改意见位置 ==========");
+        log.info("修改意见内容（前200字符）：{}", content.substring(0, Math.min(200, content.length())));
+        log.info("作文内容长度：{}", essayContent.length());
+        
+        // 尝试多种格式提取原文
+        String[][] patterns = {
+            // 格式1: **原句**：xxx **修改后**：yyy
+            {"\\*\\*原句\\*\\*[\\uff1a:](.*?)\\s*\\*\\*修改后\\*\\*", "格式1"},
+            // 格式2: 原句：xxx 修改后：yyy
+            {"原句[\\uff1a:](.*?)(?:修改后|修改为|改为)[\\uff1a:]", "格式2"},
+            // 格式3: "xxx"修改为"yyy"
+            {"\\u201c([^\\u201d]{3,})\\u201d\\s*(?:修改为|改为)\\s*\\u201c", "格式3"},
+            // 格式4: 将"xxx"改为"yyy"
+            {"将\\u201c([^\\u201d]{3,})\\u201d(?:改为|修改为)", "格式4"},
+            // 格式5: xxx -> yyy 或 xxx→yyy
+            {"([^\\n\\u2192\\->{]{5,})\\s*[\\-\\u2192>]+\\s*", "格式5"},
+            // 格式6: 1. xxx 修改后：yyy
+            {"\\d+[\\u3001.\\uff0e)]\\s*([^\\n]{5,})\\s*(?:修改后|改为)[\\uff1a:]", "格式6"},
+        };
+        
+        for (int i = 0; i < patterns.length; i++) {
+            String patternStr = patterns[i][0];
+            String patternDesc = patterns[i][1];
+            
+            try {
+                log.debug("尝试正则模式 {}: {}", i + 1, patternDesc);
+                Pattern pattern = Pattern.compile(patternStr, Pattern.MULTILINE | Pattern.DOTALL);
+                Matcher matcher = pattern.matcher(content);
+                
+                int matchCount = 0;
+                while (matcher.find()) {
+                    matchCount++;
+                    String originalText = matcher.group(1).trim();
+                    log.info("正则模式 {} 匹配成功（第{}个），提取到原文：{}", i + 1, matchCount, originalText);
+                    
+                    // 清理原文（去除序号、引号、星号等）
+                    String cleanedText = originalText
+                        .replaceAll("^\\d+[\\u3001.\\uff0e)]\\s*", "")  // 去除开头序号
+                        .replaceAll("^[\"'\\u201c\\u201d\\u2018\\u2019\\*]+|[\"'\\u201c\\u201d\\u2018\\u2019\\*]+$", "")  // 去除引号和星号
+                        .replaceAll("\\s+", "")  // 去除所有空格，提高匹配率
+                        .trim();
+                    
+                    log.info("清理后的原文：{}", cleanedText);
+                    
+                    if (cleanedText.length() < 3) {
+                        log.debug("原文太短（<3字符），跳过");
+                        continue;
+                    }
+                    
+                    // 在作文中查找原文位置（也去除空格后匹配）
+                    String essayContentNoSpace = essayContent.replaceAll("\\s+", "");
+                    int startOffset = essayContentNoSpace.indexOf(cleanedText);
+                    
+                    if (startOffset >= 0) {
+                        // 找到了！需要转换回原始位置（考虑空格）
+                        int actualOffset = findActualOffset(essayContent, cleanedText, startOffset);
+                        comment.setStartOffset(actualOffset);
+                        comment.setEndOffset(actualOffset + cleanedText.length());
+                        comment.setRelatedText(cleanedText);
+                        log.info("✓ 修改意见找到位置：原文={}, startOffset={}, endOffset={}", 
+                            cleanedText.substring(0, Math.min(30, cleanedText.length())), 
+                            actualOffset, actualOffset + cleanedText.length());
+                        log.info("========== 提取成功 ==========");
+                        return;
+                    } else {
+                        log.debug("在作文中未找到原文（去空格后）：{}", cleanedText.substring(0, Math.min(30, cleanedText.length())));
+                        
+                        // 尝试部分匹配（取前10个字符）
+                        if (cleanedText.length() >= 10) {
+                            String partial = cleanedText.substring(0, 10);
+                            int partialOffset = essayContentNoSpace.indexOf(partial);
+                            if (partialOffset >= 0) {
+                                log.info("找到部分匹配（前10字符）：{}", partial);
+                                int actualOffset = findActualOffset(essayContent, partial, partialOffset);
+                                comment.setStartOffset(actualOffset);
+                                comment.setEndOffset(actualOffset + partial.length());
+                                comment.setRelatedText(partial);
+                                log.info("✓ 修改意见找到部分位置：原文={}, startOffset={}, endOffset={}", 
+                                    partial, actualOffset, actualOffset + partial.length());
+                                log.info("========== 提取成功（部分匹配） ==========");
+                                return;
+                            }
+                        }
+                    }
+                }
+                
+                if (matchCount > 0) {
+                    log.debug("正则模式 {} 匹配了 {} 次，但都未在作文中找到", i + 1, matchCount);
+                }
+            } catch (Exception e) {
+                log.error("正则模式 {} 执行失败：{}", i + 1, e.getMessage());
+            }
+        }
+        
+        log.warn("修改意见未找到位置：尝试了所有正则模式都失败");
+        log.info("========== 提取失败 ==========");
+    }
+
+    /**
+     * 找到实际的偏移量（考虑空格）
+     */
+    private int findActualOffset(String essayContent, String cleanedText, int noSpaceOffset) {
+        int actualOffset = 0;
+        int noSpaceCount = 0;
+        
+        for (int i = 0; i < essayContent.length(); i++) {
+            char c = essayContent.charAt(i);
+            if (!Character.isWhitespace(c)) {
+                if (noSpaceCount == noSpaceOffset) {
+                    return actualOffset;
+                }
+                noSpaceCount++;
+            }
+            actualOffset++;
+        }
+        
+        return 0;
+    }
+
+    /**
+     * 从改进建议中提取位置信息
+     * 尝试从建议内容中提取引用的原文片段
+     */
+    private void extractPositionFromSuggestion(ReviewCommentEntity comment, String essayContent) {
+        if (comment.getContent() == null || essayContent == null) {
+            log.debug("跳过位置提取：content 或 essayContent 为空");
+            return;
+        }
+        
+        String content = comment.getContent();
+        log.debug("开始从改进建议中提取位置，content前100字符：{}", content.substring(0, Math.min(100, content.length())));
+        
+        try {
+            // 尝试提取引号中的内容作为原文引用 (使用 Unicode 转义)
+            Pattern quotePattern = Pattern.compile("[\"'\\u201c\\u201d\\u2018\\u2019]([^\"'\\u201c\\u201d\\u2018\\u2019]{5,})[\"'\\u201c\\u201d\\u2018\\u2019]");
+            Matcher matcher = quotePattern.matcher(content);
+            
+            while (matcher.find()) {
+                String quotedText = matcher.group(1).trim();
+                log.debug("提取到引用文本：{}", quotedText);
+                
+                // 在作文中查找引用文本的位置
+                int startOffset = essayContent.indexOf(quotedText);
+                if (startOffset >= 0) {
+                    comment.setStartOffset(startOffset);
+                    comment.setEndOffset(startOffset + quotedText.length());
+                    comment.setRelatedText(quotedText);
+                    log.info("改进建议找到位置：引用文本={}, startOffset={}, endOffset={}", 
+                        quotedText, startOffset, startOffset + quotedText.length());
+                    return; // 找到第一个匹配就返回
+                } else {
+                    log.debug("在作文中未找到引用文本：{}", quotedText);
+                }
+            }
+        } catch (Exception e) {
+            log.error("提取改进建议位置失败：{}", e.getMessage(), e);
+        }
+        
+        log.debug("改进建议未找到位置：content前50字符={}", content.substring(0, Math.min(50, content.length())));
     }
 
     private String buildReviewPrompt(String essayTitle, String essayContent) {

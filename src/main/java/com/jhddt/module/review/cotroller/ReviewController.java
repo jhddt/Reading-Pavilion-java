@@ -7,6 +7,7 @@ import com.jhddt.module.review.entity.ReviewRecordEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
 import com.jhddt.module.review.service.ReviewService;
 import com.jhddt.module.review.vo.ReviewRecordDetailVO;
+import com.jhddt.module.review.vo.ReviewRecordVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -69,7 +70,7 @@ public class ReviewController {
                     )
             )
     })
-    @PostMapping(value = "/essay/{id}", consumes = "application/json", produces = "application/json")
+    @PostMapping(value = "/essay/{id}", produces = "application/json")
     public Result<ReviewRecordDetailVO> reviewEssay(
             @Parameter(description = "作文ID", required = true, example = "100")
             @PathVariable Long id,
@@ -94,16 +95,13 @@ public class ReviewController {
             Authentication authentication) {
         try {
             Long userId = (Long) authentication.getPrincipal();
-            ReviewRecordDetailVO detail = reviewService.getReviewDetail(reviewId);
+            ReviewRecordDetailVO detail = reviewService.getReviewDetail(reviewId, userId);
             if (detail == null) {
-                return Result.error(404, "评审记录不存在");
-            }
-            // 验证权限：只能查询自己作文的评审记录
-            if (detail.getEssayId() != null) {
-                // 这里可以添加额外的权限验证逻辑，比如检查 essay 是否属于当前用户
-                // 暂时先允许查询，后续可以根据需要添加权限检查
+                return Result.error(404, "评审记录不存在或无权访问");
             }
             return Result.success("查询成功", detail);
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
         }
@@ -117,16 +115,17 @@ public class ReviewController {
             Authentication authentication) {
         try {
             Long userId = (Long) authentication.getPrincipal();
-            // 验证权限：只能查询自己作文的评审记录（在 Service 层已实现）
-            return Result.success("查询成功", reviewService.listByEssayId(essayId));
+            return Result.success("查询成功", reviewService.listByEssayId(essayId, userId));
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
         }
     }
 
-    @Operation(summary = "分页查询评审记录列表", description = "支持按状态和评审者类型筛选，结果按创建时间倒序排列")
+    @Operation(summary = "分页查询评审记录列表", description = "查询当前用户的评审记录，支持按状态和评审者类型筛选，结果按创建时间倒序排列")
     @GetMapping("/records")
-    public Result<Page<ReviewRecordEntity>> pageReviewRecords(
+    public Result<Page<ReviewRecordVO>> pageReviewRecords(
             @Parameter(description = "页码", example = "1")
             @RequestParam(defaultValue = "1") Integer page,
             @Parameter(description = "每页数量", example = "10")
@@ -138,7 +137,7 @@ public class ReviewController {
             Authentication authentication) {
         try {
             Long userId = (Long) authentication.getPrincipal();
-            return Result.success("查询成功", reviewService.pageRecords(page, pageSize, status, reviewerType));
+            return Result.success("查询成功", reviewService.pageRecords(page, pageSize, status, reviewerType, userId));
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
         }
@@ -196,7 +195,7 @@ public class ReviewController {
     }
 
     @Operation(summary = "启用/禁用评分维度", description = "通过 enabled=true/false 控制 status=1/0")
-    @PatchMapping(value = "/dimensions/{id}/status", consumes = "application/json", produces = "application/json")
+    @PatchMapping(value = "/dimensions/{id}/status", produces = "application/json")
     public Result<Void> updateDimensionStatus(
             @Parameter(description = "维度ID", required = true, example = "1")
             @PathVariable Long id,
@@ -227,13 +226,30 @@ public class ReviewController {
         }
     }
 
+    @Operation(summary = "删除评审记录", description = "逻辑删除评审记录（is_deleted=1），仅允许删除自己作文的评审记录")
+    @DeleteMapping("/record/{reviewId}")
+    public Result<Void> deleteReviewRecord(
+            @Parameter(description = "评审记录ID", required = true, example = "1")
+            @PathVariable Long reviewId,
+            Authentication authentication) {
+        try {
+            Long userId = (Long) authentication.getPrincipal();
+            boolean ok = reviewService.deleteReviewRecord(reviewId, userId);
+            return ok ? Result.success() : Result.error("删除失败（评审记录不存在或无权删除）");
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("删除失败: " + e.getMessage());
+        }
+    }
+
     // =========================
-    // 文本纠错测试接口
+    // 文本纠错接口
     // =========================
 
     @Operation(
-            summary = "测试文本纠错功能",
-            description = "调用外部文本纠错服务，返回纠错结果（不保存到数据库），用于测试纠错服务是否正常工作"
+            summary = "对作文进行文本纠错",
+            description = "根据作文ID查询作文内容，调用文本纠错服务并保存纠错结果到数据库"
     )
     @ApiResponses({
             @ApiResponse(
@@ -245,39 +261,31 @@ public class ReviewController {
                                     {
                                       "code": 200,
                                       "message": "纠错成功",
-                                      "data": [
-                                        {
-                                          "originalText": "这是一个错别字",
-                                          "correctedText": "这是一个错别字",
-                                          "startOffset": 0,
-                                          "endOffset": 5,
-                                          "errorType": "spelling",
-                                          "suggestion": "建议修改为：这是一个错别字"
-                                        }
-                                      ]
+                                      "data": {
+                                        "reviewId": 1,
+                                        "correctionCount": 45
+                                      }
                                     }
                                     """)
                     )
             )
     })
-    @PostMapping(value = "/text-correction/test", consumes = "application/json", produces = "application/json")
-    public Result<List<TextCorrectionDTO>> testTextCorrection(
-            @Parameter(description = "待纠错的文本内容", required = true, example = "这是一篇测试作文，包含一些错别字和语法错误。")
-            @RequestBody Map<String, String> request,
+    @PostMapping(value = "/essay/{essayId}/correct", produces = "application/json")
+    public Result<Map<String, Object>> correctEssay(
+            @Parameter(description = "作文ID", required = true, example = "100")
+            @PathVariable Long essayId,
+            @Parameter(description = "评审记录ID（可选，如果不提供则创建新的评审记录）", example = "1")
+            @RequestParam(required = false) Long reviewId,
             Authentication authentication) {
         try {
             Long userId = (Long) authentication.getPrincipal();
-            String text = request.get("text");
-            if (text == null || text.trim().isEmpty()) {
-                return Result.error("文本内容不能为空");
-            }
-            List<TextCorrectionDTO> corrections = reviewService.testTextCorrection(text);
-            return Result.success("纠错成功", corrections);
+            Map<String, Object> result = reviewService.correctEssay(essayId, reviewId, userId);
+            return Result.success("纠错成功", result);
         } catch (IllegalArgumentException e) {
             return Result.error(e.getMessage());
         } catch (Exception e) {
-            log.error("文本纠错测试失败: {}", e.getMessage(), e);
-            return Result.error("文本纠错测试失败: " + e.getMessage());
+            log.error("文本纠错失败: {}", e.getMessage(), e);
+            return Result.error("文本纠错失败: " + e.getMessage());
         }
     }
 }

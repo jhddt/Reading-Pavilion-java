@@ -1,0 +1,300 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f5f7fb;
+  color: #1f2933;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.rp-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.rp-sidebar {
+  width: 220px;
+  background: #111827;
+  color: #e5e7eb;
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rp-sidebar-title {
+  font-size: 18px;
+  font-weight: 600;
+  padding: 0 20px 12px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(249, 250, 251, 0.08);
+}
+
+.rp-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.rp-menu-item {
+  padding: 10px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #d1d5db;
+}
+
+.rp-menu-item:hover {
+  background: rgba(55, 65, 81, 0.9);
+}
+
+.rp-menu-item.router-link-active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.rp-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.rp-header {
+  height: 56px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.rp-header-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rp-header-user {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.rp-content {
+  padding: 16px 20px 24px;
+}
+
+.rp-card {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.rp-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rp-card-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.rp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rp-btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.rp-btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.rp-btn-outline {
+  background: #ffffff;
+  border-color: #d1d5db;
+  color: #374151;
+}
+
+.rp-btn-outline:hover {
+  background: #f3f4f6;
+}
+
+.rp-btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.rp-btn-danger:hover {
+  background: #b91c1c;
+}
+
+.rp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rp-table th,
+.rp-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.rp-table th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+
+.rp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+.rp-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-form-label {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.rp-input,
+.rp-textarea,
+.rp-select {
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  padding: 8px 10px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rp-input:focus,
+.rp-textarea:focus,
+.rp-select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
+}
+
+.rp-textarea {
+  min-height: 160px;
+  resize: vertical;
+}
+
+.rp-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.rp-badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.rp-badge-warning {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.rp-badge-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.rp-badge-neutral {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.rp-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.rp-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  align-items: center;
+}
+
+.rp-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top left, #dbeafe, #eff6ff 40%, #f9fafb);
+}
+
+.rp-login-card {
+  width: 360px;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px 22px 18px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+}
+
+.rp-login-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rp-login-subtitle {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+.rp-error-text {
+  color: #b91c1c;
+  font-size: 12px;
+}
+
+.rp-empty {
+  padding: 20px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.jhddt.module.file.mapper.OcrTextBlockMapper">
+
+    <select id="selectByOcrId" resultType="com.jhddt.module.file.entity.OcrTextBlockEntity">
+        SELECT block_id, ocr_id, block_index, text, confidence,
+               points, x_min, y_min, x_max, y_max,
+               width, height, center_x, center_y,
+               create_time, is_deleted
+        FROM ocr_text_block
+        WHERE ocr_id = #{ocrId} AND is_deleted = 0
+        ORDER BY block_index ASC
+    </select>
+
+    <insert id="insertBatch">
+        INSERT INTO ocr_text_block
+        (ocr_id, block_index, text, confidence, points,
+         x_min, y_min, x_max, y_max, width, height, center_x, center_y, is_deleted)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.ocrId}, #{item.blockIndex}, #{item.text}, #{item.confidence}, #{item.points},
+             #{item.xMin}, #{item.yMin}, #{item.xMax}, #{item.yMax},
+             #{item.width}, #{item.height}, #{item.centerX}, #{item.centerY}, 0)
+        </foreach>
+    </insert>
+
+</mapper>

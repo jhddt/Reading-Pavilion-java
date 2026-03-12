@@ -23,4 +23,14 @@ public class OcrRecordServiceImpl extends ServiceImpl<OcrRecordMapper, OcrRecord
                         .last("LIMIT 1")
         );
     }
+
+    @Override
+    public OcrRecordEntity getByFileId(Long fileId) {
+        return this.getOne(
+                new LambdaQueryWrapper<OcrRecordEntity>()
+                        .eq(OcrRecordEntity::getFileId, fileId)
+                        .orderByDesc(OcrRecordEntity::getVersion)
+                        .last("LIMIT 1")
+        );
+    }
 }

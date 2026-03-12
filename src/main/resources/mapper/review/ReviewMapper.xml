@@ -125,6 +125,44 @@
         ORDER BY rr.create_time DESC
     </select>
 
+    <select id="selectReviewRecordsPageByUserId"
+            resultType="com.jhddt.module.review.vo.ReviewRecordVO">
+        SELECT
+            rr.review_id,
+            rr.essay_id,
+            rr.task_id,
+            rr.rule_version,
+            rr.reviewer_type,
+            rr.reviewer_id,
+            rr.model_version,
+            rr.start_time,
+            rr.end_time,
+            rr.total_score,
+            rr.status,
+            rr.error_msg,
+            rr.retry_count,
+            rr.create_time,
+            e.title AS essay_title,
+            e.submit_type AS submit_type
+        FROM review_record rr
+                 LEFT JOIN essay e ON rr.essay_id = e.essay_id
+        WHERE rr.is_deleted = 0
+          AND e.user_id = #{userId}
+        <if test="status != null">
+            AND rr.status = #{status}
+        </if>
+        <if test="reviewerType != null">
+            AND rr.reviewer_type = #{reviewerType}
+        </if>
+        ORDER BY rr.create_time DESC
+    </select>
+
+    <update id="deleteReviewRecordLogic">
+        UPDATE review_record
+        SET is_deleted = 1
+        WHERE review_id = #{reviewId} AND is_deleted = 0
+    </update>
+
     <!-- =========================
          review_score
          ========================= -->
@@ -151,17 +189,17 @@
          ========================= -->
 
     <insert id="insertReviewComments">
-        INSERT INTO review_comment (review_id, comment_type, content, is_deleted)
+        INSERT INTO review_comment (review_id, comment_type, content, start_offset, end_offset, related_text, is_deleted)
         VALUES
         <foreach collection="list" item="i" separator=",">
-            (#{i.reviewId}, #{i.commentType}, #{i.content}, 0)
+            (#{i.reviewId}, #{i.commentType}, #{i.content}, #{i.startOffset}, #{i.endOffset}, #{i.relatedText}, 0)
         </foreach>
     </insert>
 
     <select id="selectCommentsByReviewId"
             parameterType="long"
             resultType="com.jhddt.module.review.entity.ReviewCommentEntity">
-        SELECT comment_id, review_id, comment_type, content, create_time, is_deleted
+        SELECT comment_id, review_id, comment_type, content, start_offset, end_offset, related_text, create_time, is_deleted
         FROM review_comment
         WHERE review_id = #{reviewId} AND is_deleted = 0
         ORDER BY comment_type ASC, create_time ASC
@@ -243,6 +281,17 @@
              #{i.revisionNo}, NOW(), NOW())
         </foreach>
     </insert>
+
+    <select id="selectTextCorrectionsByReviewId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.TextCorrectionEntity">
+        SELECT correction_id, review_id, original_text, corrected_text,
+               start_offset, end_offset, error_type, suggestion, revision_no,
+               create_time, update_time
+        FROM text_correction
+        WHERE review_id = #{reviewId}
+        ORDER BY start_offset ASC
+    </select>
 
 </mapper>
 
