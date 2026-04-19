@@ -1,0 +1,111 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.0.3 Chrome/140.0.7339.249 Electron/38.7.0 Safari/537.36" version="29.0.3">
+  <diagram id="essay-usecase" name="Page-1">
+    <mxGraphModel dx="2852" dy="791" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="k1d0G89UY81qEX50aN09-6" value="" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="-80" y="10" width="1190" height="800" as="geometry" />
+        </mxCell>
+        <mxCell id="system" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=2;container=0;strokeColor=#CCCCCC;glass=0;shadow=1;" parent="1" vertex="1">
+          <mxGeometry x="170" y="160" width="650" height="580" as="geometry" />
+        </mxCell>
+        <mxCell id="student" value="学生用户" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" parent="1" vertex="1">
+          <mxGeometry x="70" y="310" width="60" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_login" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_info" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_edit" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_submit" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_withdraw" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_query" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_view" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="endArrow=none;html=1;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_read" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_login" value="用户注册与登录" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="180" y="200" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_info" value="管理个人信息" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="320" y="200" width="110" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_create" value="创建作文草稿" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="350" y="260" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_doc" value="上传文档创建作文" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="550" y="200" width="150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_edit" value="编辑/删除草稿" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="230" y="690" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_submit" value="提交作文" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="290" y="320" width="100" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_withdraw" value="撤回已提交作文" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="570" y="560" width="130" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_query" value="查询作文列表" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="690" y="520" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_start" value="发起智能批改" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="620" y="395" width="110" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_view" value="查看批改结果" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="375" y="550" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_read" value="阅读详细批注与纠错" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="340" y="670" width="150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" value="&amp;lt;include&amp;gt;" style="dashed=1;endArrow=open;html=1;" parent="1" source="uc_start" target="uc_query" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r2" value="&amp;lt;include&amp;gt;" style="dashed=1;endArrow=open;html=1;" parent="1" source="uc_view" target="uc_read" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r3" value="&amp;lt;extend&amp;gt;" style="dashed=1;endArrow=open;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="uc_create" target="uc_ocr" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r4" value="&amp;lt;extend&amp;gt;" style="dashed=1;endArrow=open;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0;exitDx=0;exitDy=0;" parent="1" source="uc_create" target="uc_doc" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="r5" value="&amp;lt;extend&amp;gt; 立即批改" style="dashed=1;endArrow=open;html=1;entryX=0;entryY=0;entryDx=0;entryDy=0;" parent="1" source="uc_submit" target="uc_start" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_ocr" value="上传图片OCR识别作文" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="600" y="250" width="150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="k1d0G89UY81qEX50aN09-3" style="endArrow=none;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.3333333333333333;exitDx=0;exitDy=0;exitPerimeter=0;" parent="1" source="student" target="uc_create" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="260" y="478" as="sourcePoint" />
+            <mxPoint x="428" y="290" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="k1d0G89UY81qEX50aN09-4" value="&amp;lt;extend&amp;gt;" style="dashed=1;endArrow=open;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=1;exitDx=0;exitDy=0;" parent="1" source="uc_create" target="k1d0G89UY81qEX50aN09-5" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="460" y="350" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="k1d0G89UY81qEX50aN09-5" value="上传纯文本" style="ellipse;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="560" y="300" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="k1d0G89UY81qEX50aN09-7" value="&lt;font style=&quot;font-size: 19px;&quot;&gt;&lt;b&gt;智能作文批改系统&lt;/b&gt;&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="660" y="160" width="160" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

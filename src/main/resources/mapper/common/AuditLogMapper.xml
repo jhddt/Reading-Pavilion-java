@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.jhddt.common.audit.AuditLogMapper">
+
+    <insert id="insert" parameterType="com.jhddt.common.audit.AuditLogEntity" useGeneratedKeys="true" keyProperty="logId" keyColumn="log_id">
+        INSERT INTO audit_log
+        (user_id, username, action, target_type, target_id, request_method, request_path,
+         request_ip, user_agent, request_id, result_code, success, error_message, before_data, after_data, created_at)
+        VALUES
+        (#{userId}, #{username}, #{action}, #{targetType}, #{targetId}, #{requestMethod}, #{requestPath},
+         #{requestIp}, #{userAgent}, #{requestId}, #{resultCode}, #{success}, #{errorMessage}, #{beforeData}, #{afterData}, NOW())
+    </insert>
+
+    <select id="selectRecent" resultType="com.jhddt.common.audit.AuditLogEntity">
+        SELECT log_id, user_id, username, action, target_type, target_id, request_method, request_path,
+               request_ip, user_agent, request_id, result_code, success, error_message, before_data, after_data, created_at
+        FROM audit_log
+        ORDER BY created_at DESC, log_id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

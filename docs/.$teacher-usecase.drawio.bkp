@@ -1,0 +1,100 @@
+<mxfile host="app.diagrams.net" modified="2026-04-17T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="teacher-usecase" name="Page-1">
+    <mxGraphModel dx="1420" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="system" value="作文批改平台" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="240" y="40" width="1150" height="760" as="geometry"/>
+        </mxCell>
+        <mxCell id="teacher" value="教师用户" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="300" width="60" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_login" value="教师登录" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="70" y="50" width="150" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_info" value="管理个人信息" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="70" y="150" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_query" value="查询班级作文列表" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="290" y="50" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_viewessay" value="查看作文详情" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="290" y="150" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_start" value="发起智能批改" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="540" y="50" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_viewresult" value="查看批改结果" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="540" y="150" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_read" value="阅读详细批注与纠错" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="540" y="250" width="210" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_manual" value="手动批改作文" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="800" y="50" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_revise" value="修改完善智能批改结果" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="800" y="160" width="210" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_batch" value="批量批改班级作文" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="800" y="300" width="190" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="uc_progress" value="查看批量批改进度" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="system">
+          <mxGeometry x="800" y="410" width="190" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_login">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_info">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_query">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_viewessay">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_start">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_viewresult">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_read">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_manual">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_revise">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_batch">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" style="endArrow=none;html=1;" edge="1" parent="1" source="teacher" target="uc_progress">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r1" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_viewessay" target="uc_query">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_start" target="uc_viewessay">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r3" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_viewresult" target="uc_read">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4" value="&lt;&lt;extend&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_revise" target="uc_viewresult">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r5" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_batch" target="uc_query">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r6" value="&lt;&lt;include&gt;&gt;" style="dashed=1;endArrow=open;html=1;" edge="1" parent="system" source="uc_progress" target="uc_batch">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
