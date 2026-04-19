@@ -33,4 +33,16 @@ public class ReviewResult {
      */
     @Schema(description = "评审时间戳")
     private Long timestamp;
+
+    /**
+     * 原始模型返回内容
+     */
+    @Schema(description = "原始模型返回内容")
+    private String rawContent;
+
+    /**
+     * 结构化评分结果
+     */
+    @Schema(description = "结构化评分结果")
+    private StructuredReviewPayloadDTO structuredPayload;
 }

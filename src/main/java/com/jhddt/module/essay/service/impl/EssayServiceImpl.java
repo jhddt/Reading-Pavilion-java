@@ -37,13 +37,35 @@ public class EssayServiceImpl extends ServiceImpl<EssayMapper, EssayEntity> impl
         
         // 可选条件：按状态筛选
         if (status != null) {
-            queryWrapper.eq(EssayEntity::getStatus, EssayStatus.values()[status]);
+            queryWrapper.eq(EssayEntity::getStatus, EssayStatus.fromCode(status));
         }
         
         // 排序：按创建时间倒序
         queryWrapper.orderByDesc(EssayEntity::getCreateTime);
         
         // 执行分页查询
+        return this.page(pageParam, queryWrapper);
+    }
+
+    @Override
+    public Page<EssayEntity> pageForTeacherOrAdmin(Integer page, Integer pageSize, Integer status) {
+        Page<EssayEntity> pageParam = new Page<>(page, pageSize);
+        LambdaQueryWrapper<EssayEntity> queryWrapper = new LambdaQueryWrapper<>();
+
+        if (status != null) {
+            EssayStatus targetStatus = EssayStatus.fromCode(status);
+            // 老师/管理员不应看到草稿
+            if (EssayStatus.DRAFT.equals(targetStatus)) {
+                queryWrapper.eq(EssayEntity::getId, -1L);
+            } else {
+                queryWrapper.eq(EssayEntity::getStatus, targetStatus);
+            }
+        } else {
+            // 默认仅返回学生已提交及后续状态的作文
+            queryWrapper.apply("status >= {0}", EssayStatus.SUBMITTED.getCode());
+        }
+
+        queryWrapper.orderByDesc(EssayEntity::getCreateTime);
         return this.page(pageParam, queryWrapper);
     }
 

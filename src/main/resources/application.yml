@@ -2,7 +2,7 @@ spring:
   datasource:
     # MySQL 8
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/essay_system_v3?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
+    url: jdbc:mysql://localhost:3306/essay_system_v4?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8
     username: root
     password: 1234
 
@@ -47,6 +47,22 @@ spring:
           model: deepseek-chat  # 模型名称
           temperature: 0.7      # 温度参数
           max-tokens: 4096       # 最大 token 数（DeepSeek 当前允许范围 [1, 8192]，适当留余量）
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: admin
+    password: Admin@123
+    virtual-host: /
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: 123456
+      timeout: 3000ms
 
 # MinIO 配置
 minio:
@@ -58,7 +74,7 @@ minio:
 # OCR 服务配置
 ocr:
   service:
-    url: http://0.0.0.0:8000  # FastAPI OCR 服务地址
+    url: http://127.0.0.1:8000  # FastAPI OCR 服务地址
 
 # 文本纠错服务配置
 correct:
@@ -88,6 +104,14 @@ file:
 review:
   rule:
     version: v1.0  # 评分规则版本
+  mq:
+    exchange: review.direct
+    queue: review.grading.queue
+    routing-key: review.grading
+  cache:
+    status-ttl-minutes: 60
+    detail-ttl-minutes: 120
+    lock-ttl-minutes: 15
 
 # 日志配置（生产环境建议改为 INFO）
 logging:

@@ -39,7 +39,12 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
-        log.error("系统异常: ", e);
+        log.error("系统异常: ", e);  // 这会打印完整堆栈
+        log.error("异常类型: {}", e.getClass().getName());
+        log.error("异常消息: {}", e.getMessage());
+        if (e.getCause() != null) {
+            log.error("异常原因: {}", e.getCause().getMessage());
+        }
         return Result.error("系统异常，请联系管理员");
     }
 

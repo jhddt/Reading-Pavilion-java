@@ -41,6 +41,20 @@ public class ReviewRecordEntity {
     private Long taskId;
 
     /**
+     * 批量任务ID（当由批量批改触发时有值）
+     */
+    @Schema(description = "批量任务ID")
+    @TableField("batch_task_id")
+    private Long batchTaskId;
+
+    /**
+     * 来源评审ID（老师修订AI结果时关联原评审）
+     */
+    @Schema(description = "来源评审ID")
+    @TableField("source_review_id")
+    private Long sourceReviewId;
+
+    /**
      * 评审提示词（最大长度：255）
      * <p>
      * 存储用于本次评审的完整提示词，包含作文内容、评分维度要求等信息。

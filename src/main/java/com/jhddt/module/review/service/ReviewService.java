@@ -1,12 +1,24 @@
 package com.jhddt.module.review.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.jhddt.common.enums.EssayStatus;
 import com.jhddt.module.essay.entity.EssayEntity;
 import com.jhddt.module.essay.service.EssayService;
 import com.jhddt.module.review.dto.ReviewResult;
+import com.jhddt.module.review.dto.ReviewRuleSnapshotDTO;
+import com.jhddt.module.review.dto.ReviewTaskMessage;
+import com.jhddt.module.review.dto.BatchReviewItemResult;
+import com.jhddt.module.review.dto.BatchReviewResponse;
+import com.jhddt.module.review.dto.StructuredReviewPayloadDTO;
+import com.jhddt.module.review.dto.StructuredScoreItemDTO;
+import com.jhddt.module.review.dto.TeacherManualReviewRequest;
+import com.jhddt.module.review.dto.TeacherManualCommentInput;
+import com.jhddt.module.review.dto.TeacherScoreInput;
 import com.jhddt.module.review.dto.TextCorrectionDTO;
+import com.jhddt.module.review.entity.BatchReviewTaskEntity;
 import com.jhddt.module.review.entity.ReviewCommentEntity;
 import com.jhddt.module.review.entity.ReviewRecordEntity;
+import com.jhddt.module.review.entity.ReviewRuleEntity;
 import com.jhddt.module.review.entity.ReviewScoreEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
 import com.jhddt.module.review.entity.TextCorrectionEntity;
@@ -15,20 +27,27 @@ import com.jhddt.module.review.vo.ReviewCommentVO;
 import com.jhddt.module.review.vo.ReviewRecordDetailVO;
 import com.jhddt.module.review.vo.ReviewRecordVO;
 import com.jhddt.module.review.vo.ReviewScoreVO;
+import com.jhddt.module.review.vo.ReviewStatusVO;
 import com.jhddt.common.util.JwtUtil;
 import com.jhddt.config.security.JwtProperties;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -37,6 +56,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import io.jsonwebtoken.Claims;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -59,11 +79,24 @@ public class ReviewService {
     private final EssayService essayService;
     @Qualifier("correctServiceRestTemplate")
     private final RestTemplate correctServiceRestTemplate;
+    private final RabbitTemplate rabbitTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final ObjectMapper objectMapper;
     private final JwtUtil jwtUtil;
     private final JwtProperties jwtProperties;
 
     @Value("${correct.service.url:http://127.0.0.1:8001}")
     private String correctServiceUrl;
+    @Value("${review.mq.exchange}")
+    private String reviewExchange;
+    @Value("${review.mq.routing-key}")
+    private String reviewRoutingKey;
+    @Value("${review.cache.status-ttl-minutes:60}")
+    private long reviewStatusTtlMinutes;
+    @Value("${review.cache.detail-ttl-minutes:120}")
+    private long reviewDetailTtlMinutes;
+    @Value("${review.cache.lock-ttl-minutes:15}")
+    private long reviewLockTtlMinutes;
 
     // =========================
     // 评审主流程
@@ -73,7 +106,11 @@ public class ReviewService {
      * 发起批改（异步处理）
      * 立即返回 reviewId 和 PROCESSING 状态，实际批改在后台异步执行
      */
-    public ReviewRecordDetailVO reviewEssayAndSave(Long essayId, Long userId) {
+    public ReviewRecordDetailVO reviewEssayAndSave(Long essayId, Long userId, Long ruleId) {
+        return reviewEssayAndSave(essayId, userId, ruleId, null);
+    }
+
+    public ReviewRecordDetailVO reviewEssayAndSave(Long essayId, Long userId, Long ruleId, Long batchTaskId) {
         // 打印当前token的剩余有效期
         printTokenRemainingValidity();
         
@@ -82,7 +119,7 @@ public class ReviewService {
         if (essay == null) {
             throw new IllegalArgumentException("作文不存在");
         }
-        if (userId != null && essay.getUserId() != null && !Objects.equals(essay.getUserId(), userId)) {
+        if (userId != null && essay.getUserId() != null && !Objects.equals(essay.getUserId(), userId) && !hasReviewManagePrivilege()) {
             throw new IllegalArgumentException("无权操作此作文");
         }
 
@@ -95,15 +132,23 @@ public class ReviewService {
             throw new IllegalArgumentException("作文内容为空，无法评审");
         }
 
-        // 3) 构建提示词（并作为 rule_version 存档）
-        String prompt = buildReviewPrompt(essay.getTitle(), essayContent);
+        if (!tryAcquireReviewLock(essayId)) {
+            throw new IllegalArgumentException("该作文正在批改，请勿重复提交");
+        }
+
+        ReviewRuleEntity selectedRule = getReviewRuleForPrompt(ruleId);
+        ReviewRuleSnapshotDTO ruleSnapshot = buildRuleSnapshot(selectedRule);
+
+        // 3) 构建提示词（并作为 rule_version 快照存档）
+        String prompt = buildReviewPrompt(essay.getTitle(), essayContent, selectedRule);
 
         // 4) 先插入 review_record（PROCESSING）
         LocalDateTime startTime = LocalDateTime.now();
         ReviewRecordEntity record = ReviewRecordEntity.builder()
                 .essayId(essayId)
+                .batchTaskId(batchTaskId)
                 .reviewerType(0)
-                .ruleVersion(prompt)
+                .ruleVersion(serializeRuleSnapshot(ruleSnapshot))
                 .modelVersion("deepseek-chat")
                 .startTime(startTime)
                 .status(1) // PROCESSING
@@ -111,9 +156,48 @@ public class ReviewService {
                 .build();
         reviewMapper.insertReviewRecord(record);
         Long reviewId = record.getReviewId();
+        reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                .reviewId(reviewId)
+                .taskId(reviewId)
+                .build());
+        cacheReviewStatus(ReviewStatusVO.builder()
+                .reviewId(reviewId)
+                .essayId(essayId)
+                .status(1)
+                .updateTime(startTime)
+                .build());
 
-        // 5) 异步执行实际批改逻辑
-        doReviewAsync(reviewId, essayId, essayContent, prompt, essay.getTitle());
+        // 5) 将作文状态切到批改中，再投递 MQ 消息
+        updateEssayStatus(essayId, EssayStatus.CORRECTING);
+        try {
+            rabbitTemplate.convertAndSend(
+                    reviewExchange,
+                    reviewRoutingKey,
+                    ReviewTaskMessage.builder()
+                            .reviewId(reviewId)
+                            .essayId(essayId)
+                            .ruleId(ruleId)
+                            .batchTaskId(batchTaskId)
+                            .build());
+        } catch (Exception e) {
+            log.error("发送批改任务到 RabbitMQ 失败，reviewId={}, essayId={}, error={}", reviewId, essayId, e.getMessage(), e);
+            reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(3)
+                    .endTime(LocalDateTime.now())
+                    .errorMsg("消息投递失败: " + e.getMessage())
+                    .build());
+            updateEssayStatus(essayId, EssayStatus.SUBMITTED);
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(3)
+                    .errorMsg("消息投递失败: " + e.getMessage())
+                    .updateTime(LocalDateTime.now())
+                    .build());
+            releaseReviewLock(essayId);
+            throw new RuntimeException("批改任务投递失败，请稍后重试");
+        }
 
         // 6) 立即返回，包含 reviewId 和 PROCESSING 状态
         ReviewRecordDetailVO vo = ReviewRecordDetailVO.builder()
@@ -124,17 +208,65 @@ public class ReviewService {
                 .modelVersion("deepseek-chat")
                 .startTime(startTime)
                 .status(1) // PROCESSING
+                .ruleId(ruleSnapshot.getRuleId())
+                .ruleName(ruleSnapshot.getRuleName())
+                .reviewType(ruleSnapshot.getReviewType())
+                .gradeLevel(ruleSnapshot.getGradeLevel())
                 .build();
         return vo;
     }
 
-    /**
-     * 异步执行批改逻辑（包含文本纠错）
-     */
-    @Async
-    public void doReviewAsync(Long reviewId, Long essayId, String essayContent, String prompt, String essayTitle) {
+    public void processReviewTask(Long reviewId, Long essayId, Long ruleId, Long batchTaskId) {
+        EssayEntity essay = essayService.getById(essayId);
+        if (essay == null) {
+            log.error("批改任务对应作文不存在，reviewId={}, essayId={}", reviewId, essayId);
+            reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(3)
+                    .endTime(LocalDateTime.now())
+                    .errorMsg("作文不存在")
+                    .build());
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(3)
+                    .errorMsg("作文不存在")
+                    .updateTime(LocalDateTime.now())
+                    .build());
+            markBatchTaskFail(batchTaskId);
+            releaseReviewLock(essayId);
+            return;
+        }
+
+        String essayContent = essay.getFinalContent();
+        if (essayContent == null || essayContent.trim().isEmpty()) {
+            essayContent = essay.getOriginalContent();
+        }
+        if (essayContent == null || essayContent.trim().isEmpty()) {
+            reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(3)
+                    .endTime(LocalDateTime.now())
+                    .errorMsg("作文内容为空，无法评审")
+                    .build());
+            updateEssayStatus(essayId, EssayStatus.SUBMITTED);
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(3)
+                    .errorMsg("作文内容为空，无法评审")
+                    .updateTime(LocalDateTime.now())
+                    .build());
+            markBatchTaskFail(batchTaskId);
+            releaseReviewLock(essayId);
+            return;
+        }
+
+        ReviewRuleEntity selectedRule = getReviewRuleForPrompt(ruleId);
+        String prompt = buildReviewPrompt(essay.getTitle(), essayContent, selectedRule);
+
         try {
-            log.info("开始异步批改，reviewId={}, essayId={}", reviewId, essayId);
+            log.info("开始消费 RabbitMQ 批改任务，reviewId={}, essayId={}", reviewId, essayId);
 
             // 1) 先调用文本纠错服务并保存（不影响主流程，失败仅记录日志）
             try {
@@ -147,13 +279,15 @@ public class ReviewService {
             ReviewResult aiResult = callAi(prompt);
 
             // 3) 保存各维度得分（先保存，用于计算总分）
-            List<ReviewScoreEntity> savedScores = saveDimensionScoresIfAny(reviewId, aiResult.getReviewContent());
+            List<ReviewScoreEntity> savedScores = saveDimensionScoresIfAny(reviewId, aiResult, selectedRule);
 
             // 4) 计算总分：从 review_score 表中同一 review_id 的所有 score 字段求和
             BigDecimal calculatedTotalScore = calculateTotalScoreFromSavedScores(reviewId);
             // 如果计算出总分就用计算的，否则用 AI 返回的总分作为兜底
-            BigDecimal totalScore = calculatedTotalScore != null 
-                    ? calculatedTotalScore 
+            BigDecimal totalScore = calculatedTotalScore != null
+                    ? calculatedTotalScore
+                    : aiResult.getStructuredPayload() != null && aiResult.getStructuredPayload().getTotalScore() != null
+                    ? aiResult.getStructuredPayload().getTotalScore()
                     : parseTotalScore(aiResult.getScore());
 
             // 5) 更新记录（SUCCESS）
@@ -164,9 +298,19 @@ public class ReviewService {
                     .totalScore(totalScore)
                     .build();
             reviewMapper.updateReviewRecordById(record);
+            updateEssayStatus(essayId, EssayStatus.CORRECTED);
 
             // 6) 保存评论（总评/建议/修改意见），并填充位置信息
             saveCommentsWithPosition(reviewId, aiResult.getReviewContent(), essayContent);
+            evictReviewDetailCache(reviewId);
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(2)
+                    .totalScore(totalScore)
+                    .updateTime(LocalDateTime.now())
+                    .build());
+            markBatchTaskSuccess(batchTaskId);
 
             log.info("异步批改完成，reviewId={}, essayId={}, totalScore={}", reviewId, essayId, totalScore);
         } catch (Exception e) {
@@ -179,7 +323,136 @@ public class ReviewService {
                     .errorMsg(e.getMessage())
                     .build();
             reviewMapper.updateReviewRecordById(record);
+            updateEssayStatus(essayId, EssayStatus.SUBMITTED);
+            evictReviewDetailCache(reviewId);
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(3)
+                    .errorMsg(e.getMessage())
+                    .updateTime(LocalDateTime.now())
+                    .build());
+            markBatchTaskFail(batchTaskId);
+        } finally {
+            releaseReviewLock(essayId);
         }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public BatchReviewResponse batchReviewAndSave(List<Long> essayIds, Long userId, Long ruleId) {
+        if (essayIds == null || essayIds.isEmpty()) {
+            throw new IllegalArgumentException("essayIds 不能为空");
+        }
+        List<Long> distinctIds = essayIds.stream().filter(Objects::nonNull).distinct().toList();
+        BatchReviewTaskEntity task = BatchReviewTaskEntity.builder()
+                .creatorId(userId)
+                .ruleId(ruleId)
+                .totalCount(distinctIds.size())
+                .successCount(0)
+                .failCount(0)
+                .status(0)
+                .startTime(LocalDateTime.now())
+                .build();
+        reviewMapper.insertBatchTask(task);
+
+        List<BatchReviewItemResult> items = new ArrayList<>();
+        int success = 0;
+        int fail = 0;
+        for (Long essayId : distinctIds) {
+            try {
+                ReviewRecordDetailVO detail = reviewEssayAndSave(essayId, userId, ruleId, task.getTaskId());
+                success++;
+                items.add(BatchReviewItemResult.builder()
+                        .essayId(essayId)
+                        .reviewId(detail.getReviewId())
+                        .success(true)
+                        .message("已提交批改任务")
+                        .build());
+            } catch (Exception e) {
+                fail++;
+                items.add(BatchReviewItemResult.builder()
+                        .essayId(essayId)
+                        .success(false)
+                        .message(e.getMessage())
+                        .build());
+            }
+        }
+
+        reviewMapper.updateBatchTaskById(BatchReviewTaskEntity.builder()
+                .taskId(task.getTaskId())
+                .successCount(success)
+                .failCount(fail)
+                .status(fail == 0 ? 1 : 2)
+                .endTime(LocalDateTime.now())
+                .errorMsg(fail == 0 ? null : "部分作文提交失败")
+                .build());
+
+        return BatchReviewResponse.builder()
+                .batchTaskId(task.getTaskId())
+                .totalCount(distinctIds.size())
+                .successCount(success)
+                .failCount(fail)
+                .items(items)
+                .build();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ReviewRecordDetailVO createTeacherManualReview(Long teacherId, TeacherManualReviewRequest request) {
+        if (request == null || request.getEssayId() == null) {
+            throw new IllegalArgumentException("essayId 不能为空");
+        }
+        EssayEntity essay = essayService.getById(request.getEssayId());
+        if (essay == null) {
+            throw new IllegalArgumentException("作文不存在");
+        }
+
+        ReviewRecordEntity sourceRecord = null;
+        if (request.getSourceReviewId() != null) {
+            sourceRecord = reviewMapper.selectReviewRecordById(request.getSourceReviewId());
+            if (sourceRecord == null) {
+                throw new IllegalArgumentException("来源评审记录不存在");
+            }
+            if (!Objects.equals(sourceRecord.getEssayId(), request.getEssayId())) {
+                throw new IllegalArgumentException("来源评审与作文不匹配");
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        ReviewRecordEntity record = ReviewRecordEntity.builder()
+                .essayId(request.getEssayId())
+                .sourceReviewId(request.getSourceReviewId())
+                .reviewerType(1)
+                .reviewerId(teacherId)
+                .ruleVersion(request.getRuleVersion() != null ? request.getRuleVersion() : (sourceRecord != null ? sourceRecord.getRuleVersion() : "教师手动批改"))
+                .modelVersion("teacher-manual")
+                .startTime(now)
+                .endTime(now)
+                .status(2)
+                .retryCount(0)
+                .build();
+        reviewMapper.insertReviewRecord(record);
+        reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder().reviewId(record.getReviewId()).taskId(record.getReviewId()).build());
+
+        saveTeacherScores(record.getReviewId(), request.getScores());
+        saveTeacherComments(record.getReviewId(), request.getSummary(), request.getSuggestions(), request.getRevisions(), request.getAnnotations());
+        BigDecimal total = calculateTotalScoreFromSavedScores(record.getReviewId());
+        reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                .reviewId(record.getReviewId())
+                .totalScore(total)
+                .build());
+        updateEssayStatus(request.getEssayId(), EssayStatus.CORRECTED);
+
+        return getReviewDetail(record.getReviewId(), essay.getUserId());
+    }
+
+    private void updateEssayStatus(Long essayId, EssayStatus status) {
+        if (essayId == null || status == null) {
+            return;
+        }
+        EssayEntity essay = new EssayEntity();
+        essay.setId(essayId);
+        essay.setStatus(status);
+        essayService.updateById(essay);
     }
 
     /**
@@ -195,7 +468,7 @@ public class ReviewService {
         if (essay == null) {
             throw new IllegalArgumentException("作文不存在");
         }
-        if (userId != null && essay.getUserId() != null && !Objects.equals(essay.getUserId(), userId)) {
+        if (userId != null && essay.getUserId() != null && !Objects.equals(essay.getUserId(), userId) && !hasReviewManagePrivilege()) {
             throw new IllegalArgumentException("无权操作此作文");
         }
 
@@ -233,7 +506,7 @@ public class ReviewService {
                 throw new IllegalArgumentException("评审记录与作文不匹配");
             }
             // 验证权限
-            if (userId != null) {
+            if (userId != null && !hasReviewManagePrivilege()) {
                 EssayEntity recordEssay = essayService.getById(existingRecord.getEssayId());
                 if (recordEssay == null || !recordEssay.getUserId().equals(userId)) {
                     throw new IllegalArgumentException("无权访问此评审记录");
@@ -265,7 +538,7 @@ public class ReviewService {
         }
 
         // 验证权限：检查作文是否属于当前用户
-        if (record.getEssayId() != null && userId != null) {
+        if (record.getEssayId() != null && userId != null && !hasReviewManagePrivilege()) {
             EssayEntity essay = essayService.getById(record.getEssayId());
             if (essay == null || !essay.getUserId().equals(userId)) {
                 throw new IllegalArgumentException("无权访问此评审记录");
@@ -322,7 +595,10 @@ public class ReviewService {
             }
         }
 
-        return ReviewRecordDetailVO.builder()
+        ReviewRuleSnapshotDTO ruleSnapshot = parseRuleSnapshot(record.getRuleVersion());
+        ReviewVersionMeta versionMeta = resolveReviewVersionMeta(record.getEssayId(), record.getReviewId());
+
+        ReviewRecordDetailVO detail = ReviewRecordDetailVO.builder()
                 .reviewId(record.getReviewId())
                 .essayId(record.getEssayId())
                 .reviewerType(record.getReviewerType())
@@ -335,27 +611,71 @@ public class ReviewService {
                 .errorMsg(record.getErrorMsg())
                 .createTime(record.getCreateTime())
                 .essayTitle(essayTitle)
+                .ruleId(ruleSnapshot.getRuleId())
+                .ruleName(ruleSnapshot.getRuleName())
+                .reviewType(ruleSnapshot.getReviewType())
+                .gradeLevel(ruleSnapshot.getGradeLevel())
+                .topicRequirement(ruleSnapshot.getTopicRequirement())
+                .beautifyLevel(ruleSnapshot.getBeautifyLevel())
+                .customRequirement(ruleSnapshot.getCustomRequirement())
+                .deductionDetail(ruleSnapshot.getDeductionDetail())
+                .reviewVersion(versionMeta.reviewVersion())
+                .latestVersion(versionMeta.latestVersion())
                 .scores(scoreVOs)
                 .comments(commentVOs)
                 .textCorrections(correctionDTOs)
                 .build();
+        cacheReviewDetail(detail);
+        return detail;
     }
 
-    public List<ReviewRecordEntity> listByEssayId(Long essayId, Long userId) {
+    public ReviewStatusVO getReviewStatus(Long reviewId, Long userId) {
+        ReviewRecordEntity record = reviewMapper.selectReviewRecordById(reviewId);
+        if (record == null) {
+            return null;
+        }
+        if (record.getEssayId() != null && userId != null && !hasReviewManagePrivilege()) {
+            EssayEntity essay = essayService.getById(record.getEssayId());
+            if (essay == null || !essay.getUserId().equals(userId)) {
+                throw new IllegalArgumentException("无权访问此评审记录");
+            }
+        }
+
+        ReviewStatusVO cached = getCachedReviewStatus(reviewId);
+        if (cached != null) {
+            return cached;
+        }
+
+        ReviewStatusVO status = ReviewStatusVO.builder()
+                .reviewId(record.getReviewId())
+                .essayId(record.getEssayId())
+                .status(record.getStatus())
+                .totalScore(record.getTotalScore())
+                .errorMsg(record.getErrorMsg())
+                .updateTime(record.getEndTime() != null ? record.getEndTime() : record.getStartTime())
+                .build();
+        cacheReviewStatus(status);
+        return status;
+    }
+
+    public List<ReviewRecordVO> listByEssayId(Long essayId, Long userId) {
         // 验证权限：检查作文是否属于当前用户
-        if (essayId != null && userId != null) {
+        if (essayId != null && userId != null && !hasReviewManagePrivilege()) {
             EssayEntity essay = essayService.getById(essayId);
             if (essay == null || !essay.getUserId().equals(userId)) {
                 throw new IllegalArgumentException("无权访问此作文的评审记录");
             }
         }
-        return reviewMapper.selectReviewRecordsByEssayId(essayId);
+        return enrichReviewRecordVos(reviewMapper.selectReviewRecordsByEssayId(essayId).stream()
+                .map(this::toReviewRecordVO)
+                .toList());
     }
 
-    public Page<ReviewRecordVO> pageRecords(Integer page, Integer pageSize, Integer status, Integer reviewerType, Long userId) {
+    public Page<ReviewRecordVO> pageRecords(Integer page, Integer pageSize, Integer status, Integer reviewerType, Long essayId, Long userId) {
         Page<ReviewRecordVO> p = new Page<>(page, pageSize);
-        List<ReviewRecordVO> records = reviewMapper.selectReviewRecordsPageByUserId(p, status, reviewerType, userId);
-        p.setRecords(records);
+        Long queryUserId = hasReviewManagePrivilege() ? null : userId;
+        List<ReviewRecordVO> records = reviewMapper.selectReviewRecordsPageByUserId(p, status, reviewerType, queryUserId, essayId);
+        p.setRecords(enrichReviewRecordVos(records));
         return p;
     }
 
@@ -370,21 +690,542 @@ public class ReviewService {
             return false;
         }
         
-        if (record.getEssayId() != null && userId != null) {
+        if (record.getEssayId() != null && userId != null && !hasReviewManagePrivilege()) {
             EssayEntity essay = essayService.getById(record.getEssayId());
             if (essay == null || !essay.getUserId().equals(userId)) {
                 throw new IllegalArgumentException("无权删除此评审记录");
             }
         }
         
-        return reviewMapper.deleteReviewRecordLogic(reviewId) > 0;
+        boolean deleted = reviewMapper.deleteReviewRecordLogic(reviewId) > 0;
+        if (deleted) {
+            evictReviewDetailCache(reviewId);
+            evictReviewStatusCache(reviewId);
+        }
+        return deleted;
+    }
+
+    private void saveTeacherScores(Long reviewId, List<TeacherScoreInput> scores) {
+        if (scores == null || scores.isEmpty()) {
+            return;
+        }
+        List<ReviewScoreEntity> entities = scores.stream()
+                .filter(s -> s.getDimensionId() != null && s.getScore() != null)
+                .map(s -> ReviewScoreEntity.builder()
+                        .reviewId(reviewId)
+                        .dimensionId(s.getDimensionId())
+                        .weightSnapshot(null)
+                        .score(s.getScore())
+                        .build())
+                .toList();
+        if (!entities.isEmpty()) {
+            reviewMapper.insertReviewScores(entities);
+        }
+    }
+
+    private void saveTeacherComments(
+            Long reviewId,
+            String summary,
+            String suggestions,
+            String revisions,
+            List<TeacherManualCommentInput> annotations
+    ) {
+        List<ReviewCommentEntity> comments = new ArrayList<>();
+        if (summary != null && !summary.isBlank()) {
+            comments.add(ReviewCommentEntity.builder().reviewId(reviewId).commentType(1).content(summary).build());
+        }
+        if (suggestions != null && !suggestions.isBlank()) {
+            comments.add(ReviewCommentEntity.builder().reviewId(reviewId).commentType(2).content(suggestions).build());
+        }
+        if (revisions != null && !revisions.isBlank()) {
+            comments.add(ReviewCommentEntity.builder().reviewId(reviewId).commentType(3).content(revisions).build());
+        }
+        if (annotations != null && !annotations.isEmpty()) {
+            for (TeacherManualCommentInput item : annotations) {
+                if (item == null || item.getContent() == null || item.getContent().isBlank()) {
+                    continue;
+                }
+                Integer type = item.getCommentType();
+                if (type == null || (type != 2 && type != 3)) {
+                    type = 2;
+                }
+                comments.add(ReviewCommentEntity.builder()
+                        .reviewId(reviewId)
+                        .commentType(type)
+                        .content(item.getContent())
+                        .startOffset(item.getStartOffset())
+                        .endOffset(item.getEndOffset())
+                        .relatedText(item.getRelatedText())
+                        .build());
+            }
+        }
+        if (!comments.isEmpty()) {
+            reviewMapper.insertReviewComments(comments);
+        }
+    }
+
+    private void markBatchTaskSuccess(Long batchTaskId) {
+        if (batchTaskId == null) {
+            return;
+        }
+        BatchReviewTaskEntity task = reviewMapper.selectBatchTaskById(batchTaskId);
+        if (task == null) {
+            return;
+        }
+        int nextSuccess = Optional.ofNullable(task.getSuccessCount()).orElse(0) + 1;
+        int total = Optional.ofNullable(task.getTotalCount()).orElse(0);
+        int fail = Optional.ofNullable(task.getFailCount()).orElse(0);
+        boolean finished = nextSuccess + fail >= total && total > 0;
+        reviewMapper.updateBatchTaskById(BatchReviewTaskEntity.builder()
+                .taskId(batchTaskId)
+                .successCount(nextSuccess)
+                .status(finished ? 1 : 0)
+                .endTime(finished ? LocalDateTime.now() : null)
+                .build());
+    }
+
+    private void markBatchTaskFail(Long batchTaskId) {
+        if (batchTaskId == null) {
+            return;
+        }
+        BatchReviewTaskEntity task = reviewMapper.selectBatchTaskById(batchTaskId);
+        if (task == null) {
+            return;
+        }
+        int nextFail = Optional.ofNullable(task.getFailCount()).orElse(0) + 1;
+        int total = Optional.ofNullable(task.getTotalCount()).orElse(0);
+        int success = Optional.ofNullable(task.getSuccessCount()).orElse(0);
+        boolean finished = success + nextFail >= total && total > 0;
+        reviewMapper.updateBatchTaskById(BatchReviewTaskEntity.builder()
+                .taskId(batchTaskId)
+                .failCount(nextFail)
+                .status(finished ? 2 : 0)
+                .endTime(finished ? LocalDateTime.now() : null)
+                .errorMsg("存在失败记录")
+                .build());
+    }
+
+    private boolean tryAcquireReviewLock(Long essayId) {
+        if (essayId == null) {
+            return true;
+        }
+        Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                buildReviewLockKey(essayId),
+                "1",
+                Duration.ofMinutes(reviewLockTtlMinutes));
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    private void releaseReviewLock(Long essayId) {
+        if (essayId != null) {
+            stringRedisTemplate.delete(buildReviewLockKey(essayId));
+        }
+    }
+
+    private void cacheReviewStatus(ReviewStatusVO status) {
+        if (status == null || status.getReviewId() == null) {
+            return;
+        }
+        writeJsonCache(buildReviewStatusKey(status.getReviewId()), status, Duration.ofMinutes(reviewStatusTtlMinutes));
+    }
+
+    private ReviewStatusVO getCachedReviewStatus(Long reviewId) {
+        return readJsonCache(buildReviewStatusKey(reviewId), ReviewStatusVO.class);
+    }
+
+    private void evictReviewStatusCache(Long reviewId) {
+        if (reviewId != null) {
+            stringRedisTemplate.delete(buildReviewStatusKey(reviewId));
+        }
+    }
+
+    private void cacheReviewDetail(ReviewRecordDetailVO detail) {
+        if (detail == null || detail.getReviewId() == null) {
+            return;
+        }
+        writeJsonCache(buildReviewDetailKey(detail.getReviewId()), detail, Duration.ofMinutes(reviewDetailTtlMinutes));
+    }
+
+    private ReviewRecordDetailVO getCachedReviewDetail(Long reviewId) {
+        return readJsonCache(buildReviewDetailKey(reviewId), ReviewRecordDetailVO.class);
+    }
+
+    private void evictReviewDetailCache(Long reviewId) {
+        if (reviewId != null) {
+            stringRedisTemplate.delete(buildReviewDetailKey(reviewId));
+        }
+    }
+
+    private <T> void writeJsonCache(String key, T value, Duration ttl) {
+        if (key == null || value == null || ttl == null) {
+            return;
+        }
+        try {
+            stringRedisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(value), ttl);
+        } catch (JsonProcessingException e) {
+            log.warn("写入 Redis 缓存失败，key={}, error={}", key, e.getMessage());
+        }
+    }
+
+    private <T> T readJsonCache(String key, Class<T> clazz) {
+        if (key == null || clazz == null) {
+            return null;
+        }
+        String json = stringRedisTemplate.opsForValue().get(key);
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, clazz);
+        } catch (JsonProcessingException e) {
+            log.warn("读取 Redis 缓存失败，key={}, error={}", key, e.getMessage());
+            stringRedisTemplate.delete(key);
+            return null;
+        }
+    }
+
+    private String buildReviewLockKey(Long essayId) {
+        return "lock:review:essay:" + essayId;
+    }
+
+    private String buildReviewStatusKey(Long reviewId) {
+        return "review:status:" + reviewId;
+    }
+
+    private String buildReviewDetailKey(Long reviewId) {
+        return "review:detail:" + reviewId;
+    }
+
+    private ReviewRuleSnapshotDTO buildRuleSnapshot(ReviewRuleEntity selectedRule) {
+        if (selectedRule == null) {
+            return ReviewRuleSnapshotDTO.builder()
+                    .ruleId(null)
+                    .ruleName("系统默认通用细则")
+                    .reviewType("通用作文")
+                    .snapshotLabel("系统默认通用细则")
+                    .build();
+        }
+        return ReviewRuleSnapshotDTO.builder()
+                .ruleId(selectedRule.getRuleId())
+                .ruleName(selectedRule.getRuleName())
+                .reviewType(selectedRule.getReviewType())
+                .gradeLevel(selectedRule.getGradeLevel())
+                .topicRequirement(selectedRule.getTopicRequirement())
+                .beautifyLevel(selectedRule.getBeautifyLevel())
+                .customRequirement(selectedRule.getCustomRequirement())
+                .deductionDetail(selectedRule.getDeductionDetail())
+                .promptTemplate(selectedRule.getPromptTemplate())
+                .snapshotLabel(buildRuleSnapshotLabel(selectedRule))
+                .build();
+    }
+
+    private String buildRuleSnapshotLabel(ReviewRuleEntity selectedRule) {
+        if (selectedRule == null) {
+            return "系统默认通用细则";
+        }
+        StringBuilder label = new StringBuilder();
+        if (selectedRule.getRuleName() != null && !selectedRule.getRuleName().isBlank()) {
+            label.append(selectedRule.getRuleName());
+        } else {
+            label.append("未命名细则");
+        }
+        if (selectedRule.getGradeLevel() != null && !selectedRule.getGradeLevel().isBlank()) {
+            label.append(" / ").append(selectedRule.getGradeLevel());
+        }
+        if (selectedRule.getReviewType() != null && !selectedRule.getReviewType().isBlank()) {
+            label.append(" / ").append(selectedRule.getReviewType());
+        }
+        return label.toString();
+    }
+
+    private String serializeRuleSnapshot(ReviewRuleSnapshotDTO snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (JsonProcessingException e) {
+            log.warn("序列化批改细则快照失败，使用降级文本，error={}", e.getMessage());
+            return snapshot.getSnapshotLabel();
+        }
+    }
+
+    private ReviewRuleSnapshotDTO parseRuleSnapshot(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return ReviewRuleSnapshotDTO.builder()
+                    .ruleName("未记录批改细则")
+                    .snapshotLabel("未记录批改细则")
+                    .build();
+        }
+        try {
+            ReviewRuleSnapshotDTO snapshot = objectMapper.readValue(raw, ReviewRuleSnapshotDTO.class);
+            if (snapshot.getSnapshotLabel() == null || snapshot.getSnapshotLabel().isBlank()) {
+                snapshot.setSnapshotLabel(snapshot.getRuleName());
+            }
+            normalizeRuleSnapshot(snapshot);
+            return snapshot;
+        } catch (Exception e) {
+            ReviewRuleSnapshotDTO snapshot = ReviewRuleSnapshotDTO.builder()
+                    .ruleName(extractLegacyRuleName(raw))
+                    .reviewType(extractLegacyRuleField(raw, "批改类型"))
+                    .gradeLevel(extractLegacyRuleField(raw, "适用学段"))
+                    .topicRequirement(firstNonBlank(
+                            extractLegacyRuleField(raw, "题干要求"),
+                            extractLegacyRuleField(raw, "题目要求")
+                    ))
+                    .beautifyLevel(firstNonBlank(
+                            extractLegacyRuleField(raw, "内容润色强度参考"),
+                            extractLegacyRuleField(raw, "润色等级")
+                    ))
+                    .customRequirement(firstNonBlank(
+                            extractLegacyRuleField(raw, "自定义批改要求"),
+                            extractLegacyRuleField(raw, "细则附加要求"),
+                            extractLegacyRuleField(raw, "附加要求")
+                    ))
+                    .deductionDetail(firstNonBlank(
+                            extractLegacyRuleField(raw, "扣分细则"),
+                            extractLegacyRuleField(raw, "扣分要求")
+                    ))
+                    .snapshotLabel("历史批改细则")
+                    .promptTemplate(raw)
+                    .build();
+            normalizeRuleSnapshot(snapshot);
+            return snapshot;
+        }
+    }
+
+    private void normalizeRuleSnapshot(ReviewRuleSnapshotDTO snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        snapshot.setRuleName(cleanRuleDisplayName(snapshot.getRuleName()));
+        snapshot.setReviewType(cleanRuleField(snapshot.getReviewType()));
+        snapshot.setGradeLevel(cleanRuleField(snapshot.getGradeLevel()));
+        snapshot.setTopicRequirement(cleanRuleField(snapshot.getTopicRequirement()));
+        snapshot.setBeautifyLevel(cleanRuleField(snapshot.getBeautifyLevel()));
+        snapshot.setCustomRequirement(cleanRuleField(snapshot.getCustomRequirement()));
+        snapshot.setDeductionDetail(cleanRuleField(snapshot.getDeductionDetail()));
+        snapshot.setSnapshotLabel(cleanRuleField(snapshot.getSnapshotLabel()));
+
+        if ((snapshot.getRuleName() == null || snapshot.getRuleName().isBlank())
+                && snapshot.getSnapshotLabel() != null
+                && !snapshot.getSnapshotLabel().isBlank()) {
+            snapshot.setRuleName(snapshot.getSnapshotLabel());
+        }
+        if (snapshot.getRuleName() == null || snapshot.getRuleName().isBlank()) {
+            snapshot.setRuleName("历史批改细则");
+        }
+        if (snapshot.getSnapshotLabel() == null || snapshot.getSnapshotLabel().isBlank()) {
+            snapshot.setSnapshotLabel(snapshot.getRuleName());
+        }
+    }
+
+    private String extractLegacyRuleName(String raw) {
+        String ruleName = extractLegacyRuleField(raw, "本次选用的评分细则");
+        if (ruleName != null && !ruleName.isBlank()) {
+            return ruleName;
+        }
+        if (raw.contains("【细则规则层】") || raw.contains("请遵守以下公共规则")) {
+            return "历史批改细则";
+        }
+        return cleanRuleDisplayName(raw.length() > 24 ? raw.substring(0, 24) + "..." : raw);
+    }
+
+    private String extractLegacyRuleField(String raw, String fieldName) {
+        if (raw == null || raw.isBlank() || fieldName == null || fieldName.isBlank()) {
+            return null;
+        }
+        Pattern pattern = Pattern.compile(Pattern.quote(fieldName) + "[：:]\\s*(.+)");
+        Matcher matcher = pattern.matcher(raw);
+        if (!matcher.find()) {
+            return null;
+        }
+        return cleanRuleField(matcher.group(1));
+    }
+
+    private String cleanRuleDisplayName(String text) {
+        String cleaned = cleanRuleField(text);
+        if (cleaned == null || cleaned.isBlank()) {
+            return null;
+        }
+        if (cleaned.contains("\n")
+                || cleaned.contains("你是一位经验丰富")
+                || cleaned.contains("请遵守以下公共规则")
+                || cleaned.contains("【细则规则层】")
+                || cleaned.contains("作文内容：")) {
+            return null;
+        }
+        return cleaned;
+    }
+
+    private String cleanRuleField(String text) {
+        if (text == null) {
+            return null;
+        }
+        String cleaned = text.replace("\r", "").trim();
+        if (cleaned.isBlank()) {
+            return null;
+        }
+        if ("null".equalsIgnoreCase(cleaned) || "undefined".equalsIgnoreCase(cleaned)) {
+            return null;
+        }
+        return cleaned;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private ReviewRecordVO toReviewRecordVO(ReviewRecordEntity record) {
+        ReviewRecordVO vo = ReviewRecordVO.builder()
+                .reviewId(record.getReviewId())
+                .essayId(record.getEssayId())
+                .taskId(record.getTaskId())
+                .ruleVersion(record.getRuleVersion())
+                .reviewerType(record.getReviewerType())
+                .reviewerId(record.getReviewerId())
+                .modelVersion(record.getModelVersion())
+                .startTime(record.getStartTime())
+                .endTime(record.getEndTime())
+                .totalScore(record.getTotalScore())
+                .status(record.getStatus())
+                .errorMsg(record.getErrorMsg())
+                .retryCount(record.getRetryCount())
+                .createTime(record.getCreateTime())
+                .build();
+        tryFillEssayMeta(vo);
+        return vo;
+    }
+
+    private void tryFillEssayMeta(ReviewRecordVO vo) {
+        if (vo == null || vo.getEssayId() == null) {
+            return;
+        }
+        EssayEntity essay = essayService.getById(vo.getEssayId());
+        if (essay != null) {
+            vo.setEssayTitle(essay.getTitle());
+            vo.setSubmitType(essay.getSubmitType() != null ? essay.getSubmitType().getCode() : null);
+        }
+    }
+
+    private List<ReviewRecordVO> enrichReviewRecordVos(List<ReviewRecordVO> records) {
+        if (records == null || records.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Map<Long, List<ReviewRecordEntity>> historyMap = records.stream()
+                .map(ReviewRecordVO::getEssayId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toMap(
+                        essayId -> essayId,
+                        reviewMapper::selectReviewRecordsByEssayId
+                ));
+
+        for (ReviewRecordVO record : records) {
+            ReviewRuleSnapshotDTO snapshot = parseRuleSnapshot(record.getRuleVersion());
+            record.setRuleId(snapshot.getRuleId());
+            record.setRuleName(snapshot.getRuleName() != null ? snapshot.getRuleName() : snapshot.getSnapshotLabel());
+            record.setReviewType(snapshot.getReviewType());
+            record.setGradeLevel(snapshot.getGradeLevel());
+
+            List<ReviewRecordEntity> essayHistory = historyMap.getOrDefault(record.getEssayId(), Collections.emptyList());
+            ReviewVersionMeta versionMeta = resolveReviewVersionMeta(essayHistory, record.getReviewId());
+            record.setReviewVersion(versionMeta.reviewVersion());
+            record.setLatestVersion(versionMeta.latestVersion());
+        }
+        return records;
+    }
+
+    private ReviewVersionMeta resolveReviewVersionMeta(Long essayId, Long reviewId) {
+        if (essayId == null || reviewId == null) {
+            return new ReviewVersionMeta(1, false);
+        }
+        return resolveReviewVersionMeta(reviewMapper.selectReviewRecordsByEssayId(essayId), reviewId);
+    }
+
+    private ReviewVersionMeta resolveReviewVersionMeta(List<ReviewRecordEntity> records, Long reviewId) {
+        if (records == null || records.isEmpty() || reviewId == null) {
+            return new ReviewVersionMeta(1, false);
+        }
+        int total = records.size();
+        for (int index = 0; index < records.size(); index++) {
+            ReviewRecordEntity item = records.get(index);
+            if (Objects.equals(item.getReviewId(), reviewId)) {
+                return new ReviewVersionMeta(total - index, index == 0);
+            }
+        }
+        return new ReviewVersionMeta(total, false);
+    }
+
+    private record ReviewVersionMeta(Integer reviewVersion, Boolean latestVersion) {}
+
+    private boolean hasReviewManagePrivilege() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getAuthorities() == null) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+                .map(authority -> authority.getAuthority())
+                .anyMatch(authority ->
+                        "ROLE_TEACHER".equals(authority)
+                                || "ROLE_ADMIN".equals(authority)
+                                || "ROLE_2".equals(authority)
+                                || "ROLE_3".equals(authority));
     }
 
     // =========================
-    // 评分维度配置（CRUD）
+    // 批改细则 + 评分维度配置（CRUD）
     // =========================
 
-    public List<ScoreDimensionEntity> listDimensions(Boolean enabledOnly) {
+    public List<ReviewRuleEntity> listRules(Boolean enabledOnly) {
+        if (Boolean.TRUE.equals(enabledOnly)) {
+            return reviewMapper.selectEnabledRules();
+        }
+        return reviewMapper.selectAllRules();
+    }
+
+    public ReviewRuleEntity createRule(ReviewRuleEntity rule) {
+        validateRule(rule, true);
+        if (rule.getStatus() == null) {
+            rule.setStatus(1);
+        }
+        reviewMapper.insertRule(rule);
+        return reviewMapper.selectRuleById(rule.getRuleId());
+    }
+
+    public boolean updateRule(Long id, ReviewRuleEntity rule) {
+        if (id == null) {
+            throw new IllegalArgumentException("ruleId 不能为空");
+        }
+        rule.setRuleId(id);
+        validateRule(rule, false);
+        return reviewMapper.updateRuleById(rule) > 0;
+    }
+
+    public boolean updateRuleStatus(Long id, boolean enabled) {
+        return reviewMapper.updateRuleStatus(id, enabled ? 1 : 0) > 0;
+    }
+
+    public boolean deleteRule(Long id) {
+        return reviewMapper.deleteRuleLogic(id) > 0;
+    }
+
+    public List<ScoreDimensionEntity> listDimensions(Long ruleId, Boolean enabledOnly) {
+        if (ruleId != null) {
+            if (Boolean.TRUE.equals(enabledOnly)) {
+                return reviewMapper.selectEnabledDimensionsByRuleId(ruleId);
+            }
+            return reviewMapper.selectDimensionsByRuleId(ruleId);
+        }
         if (Boolean.TRUE.equals(enabledOnly)) {
             return reviewMapper.selectEnabledDimensions();
         }
@@ -395,6 +1236,9 @@ public class ReviewService {
         validateDimension(dim, true);
         if (dim.getStatus() == null) {
             dim.setStatus(1);
+        }
+        if (dim.getSortOrder() == null) {
+            dim.setSortOrder(0);
         }
         reviewMapper.insertDimension(dim);
         return reviewMapper.selectDimensionById(dim.getDimensionId());
@@ -417,9 +1261,21 @@ public class ReviewService {
         return reviewMapper.deleteDimensionLogic(id) > 0;
     }
 
+    private void validateRule(ReviewRuleEntity rule, boolean creating) {
+        if (rule == null) {
+            throw new IllegalArgumentException("请求体不能为空");
+        }
+        if (creating && (rule.getRuleName() == null || rule.getRuleName().trim().isEmpty())) {
+            throw new IllegalArgumentException("ruleName 不能为空");
+        }
+    }
+
     private void validateDimension(ScoreDimensionEntity dim, boolean creating) {
         if (dim == null) {
             throw new IllegalArgumentException("请求体不能为空");
+        }
+        if (dim.getRuleId() != null && reviewMapper.selectRuleById(dim.getRuleId()) == null) {
+            throw new IllegalArgumentException("关联的批改细则不存在");
         }
         if (creating && (dim.getDimensionName() == null || dim.getDimensionName().trim().isEmpty())) {
             throw new IllegalArgumentException("dimensionName 不能为空");
@@ -429,7 +1285,6 @@ public class ReviewService {
                 throw new IllegalArgumentException("weight 不能为空");
             }
         } else {
-            // 权重范围限制在 0-100（表示 0%-100%）
             if (dim.getWeight().compareTo(BigDecimal.ZERO) < 0 || dim.getWeight().compareTo(new BigDecimal("100")) > 0) {
                 throw new IllegalArgumentException("weight 必须在 0 到 100 之间");
             }
@@ -439,21 +1294,51 @@ public class ReviewService {
         }
     }
 
+    private ReviewRuleEntity getReviewRuleForPrompt(Long ruleId) {
+        if (ruleId != null) {
+            ReviewRuleEntity selectedRule = reviewMapper.selectRuleById(ruleId);
+            if (selectedRule == null) {
+                throw new IllegalArgumentException("所选评分细则不存在");
+            }
+            if (!Objects.equals(selectedRule.getStatus(), 1)) {
+                throw new IllegalArgumentException("所选评分细则未启用");
+            }
+            return selectedRule;
+        }
+        return reviewMapper.selectActiveRule();
+    }
+
+    private List<ScoreDimensionEntity> getPromptDimensions(ReviewRuleEntity selectedRule) {
+        List<ScoreDimensionEntity> dimensions = selectedRule != null
+                ? reviewMapper.selectEnabledDimensionsByRuleId(selectedRule.getRuleId())
+                : Collections.emptyList();
+        if (dimensions == null || dimensions.isEmpty()) {
+            dimensions = reviewMapper.selectEnabledDimensions();
+        }
+        return dimensions == null ? Collections.emptyList() : dimensions;
+    }
+
     // =========================
     // 内部：AI 调用 & 解析
     // =========================
 
     private ReviewResult callAi(String prompt) {
         log.info("使用 SpringAI 调用 DeepSeek API 评审作文");
-        String reviewContent = chatClient.prompt()
+        String rawContent = chatClient.prompt()
                 .user(prompt)
                 .call()
                 .content();
-        String score = extractScore(reviewContent);
+        StructuredReviewPayloadDTO structuredPayload = extractStructuredReviewPayload(rawContent);
+        String reviewContent = extractNarrativeReviewContent(rawContent);
+        String score = structuredPayload != null && structuredPayload.getTotalScore() != null
+                ? structuredPayload.getTotalScore().toPlainString()
+                : extractScore(reviewContent);
         return ReviewResult.builder()
                 .reviewContent(reviewContent)
                 .score(score)
                 .timestamp(System.currentTimeMillis())
+                .rawContent(rawContent)
+                .structuredPayload(structuredPayload)
                 .build();
     }
 
@@ -663,18 +1548,27 @@ public class ReviewService {
      * @param reviewContent AI 返回的评审内容
      * @return 保存的得分列表（用于后续计算总分）
      */
-    private List<ReviewScoreEntity> saveDimensionScoresIfAny(Long reviewId, String reviewContent) {
-        if (reviewContent == null || reviewContent.trim().isEmpty()) {
+    private List<ReviewScoreEntity> saveDimensionScoresIfAny(Long reviewId, ReviewResult reviewResult, ReviewRuleEntity selectedRule) {
+        if (reviewResult == null) {
             return new ArrayList<>();
         }
-        List<ScoreDimensionEntity> dims = reviewMapper.selectEnabledDimensions();
+        String reviewContent = reviewResult.getReviewContent();
+        List<ScoreDimensionEntity> dims = getPromptDimensions(selectedRule);
         if (dims == null || dims.isEmpty()) {
             log.warn("未配置评分维度，无法保存各维度得分。建议在 score_dimension 表中配置维度。");
             return new ArrayList<>();
         }
+        Map<String, StructuredScoreItemDTO> structuredScoreMap = buildStructuredScoreMap(reviewResult.getStructuredPayload());
         List<ReviewScoreEntity> list = new ArrayList<>();
         for (ScoreDimensionEntity d : dims) {
-            BigDecimal score = extractDimensionScore(reviewContent, d.getDimensionName());
+            BigDecimal score = null;
+            StructuredScoreItemDTO structuredItem = structuredScoreMap.get(normalizeDimensionKey(d.getDimensionName()));
+            if (structuredItem != null) {
+                score = structuredItem.getScore();
+            }
+            if (score == null) {
+                score = extractDimensionScore(reviewContent, d.getDimensionName());
+            }
             if (score != null) {
                 list.add(ReviewScoreEntity.builder()
                         .reviewId(reviewId)
@@ -688,6 +1582,31 @@ public class ReviewService {
             reviewMapper.insertReviewScores(list);
         }
         return list;
+    }
+
+    private Map<String, StructuredScoreItemDTO> buildStructuredScoreMap(StructuredReviewPayloadDTO structuredPayload) {
+        if (structuredPayload == null || structuredPayload.getItems() == null || structuredPayload.getItems().isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return structuredPayload.getItems().stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getDimensionName() != null && !item.getDimensionName().isBlank())
+                .collect(Collectors.toMap(
+                        item -> normalizeDimensionKey(item.getDimensionName()),
+                        item -> item,
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
+    }
+
+    private String normalizeDimensionKey(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceAll("\\s+", "")
+                .replace("：", "")
+                .replace(":", "")
+                .trim();
     }
 
     /**
@@ -847,8 +1766,8 @@ public class ReviewService {
             {"\\u201c([^\\u201d]{3,})\\u201d\\s*(?:修改为|改为)\\s*\\u201c", "格式3"},
             // 格式4: 将"xxx"改为"yyy"
             {"将\\u201c([^\\u201d]{3,})\\u201d(?:改为|修改为)", "格式4"},
-            // 格式5: xxx -> yyy 或 xxx→yyy
-            {"([^\\n\\u2192\\->{]{5,})\\s*[\\-\\u2192>]+\\s*", "格式5"},
+            // 格式5: xxx -> yyy 或 xxx→yyy (修复字符类范围错误)
+            {"([^\\n\\u2192\\->]{5,})\\s*[\\-\\u2192>]+\\s*", "格式5"},
             // 格式6: 1. xxx 修改后：yyy
             {"\\d+[\\u3001.\\uff0e)]\\s*([^\\n]{5,})\\s*(?:修改后|改为)[\\uff1a:]", "格式6"},
         };
@@ -994,19 +1913,70 @@ public class ReviewService {
         log.debug("改进建议未找到位置：content前50字符={}", content.substring(0, Math.min(50, content.length())));
     }
 
-    private String buildReviewPrompt(String essayTitle, String essayContent) {
+    private String buildReviewPrompt(String essayTitle, String essayContent, ReviewRuleEntity selectedRule) {
+        List<ScoreDimensionEntity> dimensions = getPromptDimensions(selectedRule);
         StringBuilder prompt = new StringBuilder();
-        prompt.append("你是一位经验丰富的语文老师，请对以下作文进行详细批改。\n");
-        prompt.append("要求：专业、客观、鼓励性；指出问题同时肯定优点。\n\n");
+        appendPromptSystemRules(prompt);
+        appendPromptRuleLayer(prompt, selectedRule);
+        appendPromptEssayContext(prompt, essayTitle, essayContent);
+        appendPromptDimensions(prompt, dimensions);
+        appendPromptOutputFormat(prompt);
+        return prompt.toString();
+    }
 
+    private void appendPromptSystemRules(StringBuilder prompt) {
+        prompt.append("你是一位经验丰富、评价标准稳定的语文老师，请只执行“内容批改”任务。\n");
+        prompt.append("请遵守以下公共规则：\n");
+        prompt.append("1. 批改时保持专业、客观、鼓励性的语气，既指出问题，也肯定优点。\n");
+        prompt.append("2. 重点评价立意、选材、结构、语言表达和完成度，不要把错别字纠正当作本次任务主体。\n");
+        prompt.append("3. 所有评分必须严格围绕给定评分细则和评分项展开，不要自行改动评分项名称。\n");
+        prompt.append("4. 每个评分项都要给出简短评价，并明确写出该项得分。\n");
+        prompt.append("5. 总评、建议和修改意见都必须结合作文原文，避免空泛套话。\n\n");
+    }
+
+    private void appendPromptRuleLayer(StringBuilder prompt, ReviewRuleEntity selectedRule) {
+        if (selectedRule == null) {
+            prompt.append("【细则规则层】未指定专用批改细则，按系统默认通用作文标准执行。\n\n");
+            return;
+        }
+
+        prompt.append("【细则规则层】\n");
+        prompt.append("本次选用的评分细则：").append(selectedRule.getRuleName()).append("\n");
+        if (selectedRule.getReviewType() != null && !selectedRule.getReviewType().isBlank()) {
+            prompt.append("批改类型：").append(selectedRule.getReviewType()).append("\n");
+        }
+        if (selectedRule.getGradeLevel() != null && !selectedRule.getGradeLevel().isBlank()) {
+            prompt.append("适用学段：").append(selectedRule.getGradeLevel()).append("\n");
+        }
+        if (selectedRule.getTopicRequirement() != null && !selectedRule.getTopicRequirement().isBlank()) {
+            prompt.append("题干要求：").append(selectedRule.getTopicRequirement()).append("\n");
+        }
+        if (selectedRule.getBeautifyLevel() != null && !selectedRule.getBeautifyLevel().isBlank()) {
+            prompt.append("内容润色强度参考：").append(selectedRule.getBeautifyLevel()).append("\n");
+        }
+        if (selectedRule.getCustomRequirement() != null && !selectedRule.getCustomRequirement().isBlank()) {
+            prompt.append("自定义批改要求：").append(selectedRule.getCustomRequirement()).append("\n");
+        }
+        if (selectedRule.getDeductionDetail() != null && !selectedRule.getDeductionDetail().isBlank()) {
+            prompt.append("扣分细则：").append(selectedRule.getDeductionDetail()).append("\n");
+        }
+        if (selectedRule.getPromptTemplate() != null && !selectedRule.getPromptTemplate().isBlank()) {
+            prompt.append("细则专属批改提示：").append(selectedRule.getPromptTemplate()).append("\n");
+        }
+        prompt.append("\n");
+    }
+
+    private void appendPromptEssayContext(StringBuilder prompt, String essayTitle, String essayContent) {
         if (essayTitle != null && !essayTitle.trim().isEmpty()) {
             prompt.append("作文标题：").append(essayTitle).append("\n\n");
         }
         prompt.append("作文内容：\n").append(essayContent).append("\n\n");
+    }
 
-        List<ScoreDimensionEntity> dimensions = reviewMapper.selectEnabledDimensions();
+    private void appendPromptDimensions(StringBuilder prompt, List<ScoreDimensionEntity> dimensions) {
+        prompt.append("【评分项层】\n");
         if (dimensions != null && !dimensions.isEmpty()) {
-            prompt.append("请按照以下评分维度进行批改，并为每个维度给出具体得分（满分见各维度说明）：\n");
+            prompt.append("请严格按以下评分项完成内容批改，并给出每项得分：\n");
             for (int i = 0; i < dimensions.size(); i++) {
                 ScoreDimensionEntity dim = dimensions.get(i);
                 String weightText = dim.getWeight() != null
@@ -1014,23 +1984,44 @@ public class ReviewService {
                         : "0.00";
                 prompt.append(String.format("%d. %s（满分%.2f分，权重%s%%）：\n",
                         i + 1, dim.getDimensionName(), dim.getMaxScore(), weightText));
+                if (dim.getDescription() != null && !dim.getDescription().isBlank()) {
+                    prompt.append("   评分说明：").append(dim.getDescription()).append("\n");
+                }
             }
-            prompt.append("\n请在每个维度的评价后，明确标注该维度的得分，格式为：【维度名称得分：XX分】\n");
+            prompt.append("\n请在每个评分项评价后，明确标注得分，格式为：【评分项名称得分：XX分】。\n\n");
         } else {
-            prompt.append("请从以下几个方面进行批改：\n");
+            prompt.append("当前没有配置到专用评分项，请按通用作文标准完成内容批改：\n");
             prompt.append("1. 内容评价：评价文章的主题、立意、选材是否恰当【内容评价得分：XX分】\n");
             prompt.append("2. 结构分析：分析文章的开头、中间、结尾是否合理，段落安排是否清晰【结构分析得分：XX分】\n");
             prompt.append("3. 语言表达：检查是否有错别字、语法错误、标点符号使用是否正确【语言表达得分：XX分】\n");
-            prompt.append("4. 修辞手法：识别文章中使用的修辞手法，评价其运用是否恰当【修辞手法得分：XX分】\n");
+            prompt.append("4. 修辞手法：识别文章中使用的修辞手法，评价其运用是否恰当【修辞手法得分：XX分】\n\n");
         }
+    }
 
-        prompt.append("\n请严格按下面【固定格式】输出（务必包含每个标记，标记不要改名）：\n");
+    private void appendPromptOutputFormat(StringBuilder prompt) {
+        prompt.append("【固定输出层】\n");
+        prompt.append("请严格按下面固定格式输出，必须包含以下全部标记，标记名称不要改动：\n");
+        prompt.append("【评分JSON】\n");
+        prompt.append("```json\n");
+        prompt.append("{\n");
+        prompt.append("  \"items\": [\n");
+        prompt.append("    {\"dimensionName\": \"评分项名称\", \"score\": 0, \"comment\": \"该项简评\"}\n");
+        prompt.append("  ],\n");
+        prompt.append("  \"totalScore\": 0\n");
+        prompt.append("}\n");
+        prompt.append("```\n");
+        prompt.append("【评语输出】\n");
         prompt.append("【总评】（对整篇作文的综合评价）\n");
         prompt.append("【改进建议】（给出3-8条可执行建议，分点列出）\n");
         prompt.append("【修改意见】（给出3-8条“原句 -> 修改后”式的具体修改，尽量从作文原文中摘句；如果原文无法摘取，也要给出可直接替换的修改示例）\n");
         prompt.append("【总分】XX（满分100）\n\n");
-        prompt.append("注意：不要只输出符号或句号，内容必须完整且可读。");
-        return prompt.toString();
+        prompt.append("注意：\n");
+        prompt.append("1. 评分JSON 必须是合法 JSON，items 中的 dimensionName 必须与给定评分项名称完全一致。\n");
+        prompt.append("2. totalScore 必须等于各评分项 score 之和。\n");
+        prompt.append("3. 【评语输出】部分必须继续使用固定标签，方便系统解析。\n");
+        prompt.append("4. 不要遗漏任何一个输出板块。\n");
+        prompt.append("5. 不要只输出符号、空话或句号，内容必须完整可读。\n");
+        prompt.append("6. 不要输出与本次内容批改无关的解释性前言。\n");
     }
 
     private List<ReviewCommentEntity> parseComments(String reviewContent) {
@@ -1038,11 +2029,19 @@ public class ReviewService {
         final String full = reviewContent.trim();
         List<ReviewCommentEntity> comments = new ArrayList<>();
 
-        // 总评：始终保存完整内容（避免截断）
-        comments.add(ReviewCommentEntity.builder()
-                .commentType(1)
-                .content(full)
-                .build());
+        String summary = extractBetweenMarkers(full, "【总评】", List.of("【改进建议】", "【修改意见】", "【总分】"));
+        if (summary != null && summary.trim().length() >= MIN_CONTENT_LENGTH) {
+            comments.add(ReviewCommentEntity.builder()
+                    .commentType(1)
+                    .content(summary.trim())
+                    .build());
+        } else {
+            // 兜底：没有明确总评标签时，才退回整段内容，避免前端完全没有总评可展示
+            comments.add(ReviewCommentEntity.builder()
+                    .commentType(1)
+                    .content(full)
+                    .build());
+        }
 
         String suggestion = extractBetweenMarkers(full, "【改进建议】", List.of("【修改意见】", "【总分】", "【总评】"));
         if (suggestion != null && suggestion.trim().length() >= MIN_CONTENT_LENGTH) {
@@ -1116,6 +2115,48 @@ public class ReviewService {
             return null;
         }
         return text.substring(start, end).trim();
+    }
+
+    private StructuredReviewPayloadDTO extractStructuredReviewPayload(String rawContent) {
+        String jsonText = extractBetweenMarkers(rawContent, "【评分JSON】", List.of("【评语输出】"));
+        if (jsonText == null || jsonText.isBlank()) {
+            return null;
+        }
+        jsonText = stripJsonFence(jsonText);
+        try {
+            StructuredReviewPayloadDTO payload = objectMapper.readValue(jsonText, StructuredReviewPayloadDTO.class);
+            if (payload.getItems() == null) {
+                payload.setItems(new ArrayList<>());
+            }
+            return payload;
+        } catch (Exception e) {
+            log.warn("解析结构化评分 JSON 失败，降级回文本提分，error={}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String extractNarrativeReviewContent(String rawContent) {
+        String narrative = extractBetweenMarkers(rawContent, "【评语输出】", null);
+        if (narrative == null || narrative.isBlank()) {
+            return rawContent == null ? "" : rawContent.trim();
+        }
+        return narrative.trim();
+    }
+
+    private String stripJsonFence(String rawText) {
+        if (rawText == null) {
+            return null;
+        }
+        String cleaned = rawText.trim();
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7).trim();
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3).trim();
+        }
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3).trim();
+        }
+        return cleaned;
     }
 
     /**

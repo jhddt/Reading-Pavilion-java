@@ -15,4 +15,7 @@ public class CreateTextEssayRequest {
 
     @Schema(description = "作文内容", example = "这是作文正文内容...", required = true)
     private String content;
+
+    @Schema(description = "美化后的作文内容", example = "这是经过润色后的作文正文内容...")
+    private String beautifiedContent;
 }

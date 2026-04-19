@@ -3,9 +3,11 @@ package com.jhddt.module.review.mapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.jhddt.module.review.entity.ReviewCommentEntity;
 import com.jhddt.module.review.entity.ReviewRecordEntity;
+import com.jhddt.module.review.entity.ReviewRuleEntity;
 import com.jhddt.module.review.entity.ReviewScoreEntity;
 import com.jhddt.module.review.entity.ScoreDimensionEntity;
 import com.jhddt.module.review.entity.TextCorrectionEntity;
+import com.jhddt.module.review.entity.BatchReviewTaskEntity;
 import com.jhddt.module.review.vo.ReviewRecordVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -41,9 +43,16 @@ public interface ReviewMapper {
     List<ReviewRecordVO> selectReviewRecordsPageByUserId(Page<ReviewRecordVO> page,
                                                           @Param("status") Integer status,
                                                           @Param("reviewerType") Integer reviewerType,
-                                                          @Param("userId") Long userId);
+                                                          @Param("userId") Long userId,
+                                                          @Param("essayId") Long essayId);
 
     int deleteReviewRecordLogic(@Param("reviewId") Long reviewId);
+
+    BatchReviewTaskEntity selectBatchTaskById(@Param("taskId") Long taskId);
+
+    int insertBatchTask(BatchReviewTaskEntity task);
+
+    int updateBatchTaskById(BatchReviewTaskEntity task);
 
     // =========================
     // review_score
@@ -62,12 +71,36 @@ public interface ReviewMapper {
     List<ReviewCommentEntity> selectCommentsByReviewId(@Param("reviewId") Long reviewId);
 
     // =========================
+    // review_rule
+    // =========================
+
+    List<ReviewRuleEntity> selectAllRules();
+
+    List<ReviewRuleEntity> selectEnabledRules();
+
+    ReviewRuleEntity selectRuleById(@Param("id") Long id);
+
+    ReviewRuleEntity selectActiveRule();
+
+    int insertRule(ReviewRuleEntity rule);
+
+    int updateRuleById(ReviewRuleEntity rule);
+
+    int updateRuleStatus(@Param("id") Long id, @Param("status") Integer status);
+
+    int deleteRuleLogic(@Param("id") Long id);
+
+    // =========================
     // score_dimension
     // =========================
 
     List<ScoreDimensionEntity> selectAllDimensions();
 
     List<ScoreDimensionEntity> selectEnabledDimensions();
+
+    List<ScoreDimensionEntity> selectDimensionsByRuleId(@Param("ruleId") Long ruleId);
+
+    List<ScoreDimensionEntity> selectEnabledDimensionsByRuleId(@Param("ruleId") Long ruleId);
 
     ScoreDimensionEntity selectDimensionById(@Param("id") Long id);
 

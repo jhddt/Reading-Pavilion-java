@@ -1,6 +1,7 @@
 package com.jhddt.module.file.controller;
 
 import com.jhddt.common.result.Result;
+import com.jhddt.common.security.CurrentUser;
 import com.jhddt.module.essay.service.FileStorageService;
 import com.jhddt.module.file.entity.FileEntity;
 import com.jhddt.module.file.service.FileService;
@@ -16,6 +17,7 @@ import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,11 +28,13 @@ import java.nio.charset.StandardCharsets;
 @Tag(name = "文件下载", description = "文件下载和访问链接生成接口")
 @RestController
 @RequestMapping("/file")
+@PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
 @RequiredArgsConstructor
 public class FileDownloadController {
 
     private final FileStorageService fileStorageService;
     private final FileService fileService;
+    private final CurrentUser currentUser;
 
     @Operation(
             summary = "下载文件",
@@ -52,7 +56,7 @@ public class FileDownloadController {
             @PathVariable Long fileId,
             Authentication authentication) {
 
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 查询文件记录
         FileEntity fileEntity = fileService.getById(fileId);
@@ -109,7 +113,7 @@ public class FileDownloadController {
             @RequestParam(defaultValue = "604800") Integer expirySeconds,
             Authentication authentication) {
 
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 查询文件记录
         FileEntity fileEntity = fileService.getById(fileId);
@@ -137,6 +141,7 @@ public class FileDownloadController {
             @ApiResponse(responseCode = "500", description = "文件路径无效")
     })
     @GetMapping("/url/path")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<String> getFileUrlByPath(
             @Parameter(description = "文件路径", required = true, example = "essay/images/1_20260227_abc123.jpg")
             @RequestParam String filePath,
@@ -171,7 +176,7 @@ public class FileDownloadController {
             @PathVariable Long essayId,
             Authentication authentication) {
 
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         try {
             java.util.List<FileEntity> files = fileService.getByEssayId(essayId, userId);

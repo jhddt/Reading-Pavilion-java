@@ -4,19 +4,28 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vue-tsc && vite build",
     "preview": "vite preview",
-    "lint": "echo \"no lint configured\""
+    "lint": "echo \"no lint configured\"",
+    "format": "prettier --write \"src/**/*.{js,ts,vue,json,css,scss,md}\"",
+    "format:check": "prettier --check \"src/**/*.{js,ts,vue,json,css,scss,md}\""
   },
   "dependencies": {
+    "@vicons/ionicons5": "^0.13.0",
+    "@vueuse/core": "^14.2.1",
     "axios": "^1.7.7",
-    "pinia": "^2.1.7",
+    "naive-ui": "^2.44.1",
+    "pinia": "^2.3.1",
+    "rough-notation": "^0.5.1",
     "vue": "^3.5.12",
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@vitejs/plugin-vue": "^5.1.2",
-    "vite": "^5.4.8"
+    "prettier": "^3.4.2",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.8",
+    "vue-tsc": "^3.2.5"
   }
 }
-

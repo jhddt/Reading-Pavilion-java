@@ -27,6 +27,13 @@ public class ScoreDimensionEntity {
     private Long dimensionId;
 
     /**
+     * 所属批改细则ID
+     */
+    @Schema(description = "所属批改细则ID", example = "1")
+    @TableField("rule_id")
+    private Long ruleId;
+
+    /**
      * 维度名称
      */
     @Schema(description = "维度名称", example = "内容评价")
@@ -46,6 +53,20 @@ public class ScoreDimensionEntity {
     @Schema(description = "满分值", example = "30.00")
     @TableField("max_score")
     private BigDecimal maxScore;
+
+    /**
+     * 维度说明
+     */
+    @Schema(description = "维度说明", example = "评价文章主题、立意与选材")
+    @TableField("description")
+    private String description;
+
+    /**
+     * 排序值
+     */
+    @Schema(description = "排序值", example = "1")
+    @TableField("sort_order")
+    private Integer sortOrder;
 
     /**
      * 状态：1-启用，0-禁用

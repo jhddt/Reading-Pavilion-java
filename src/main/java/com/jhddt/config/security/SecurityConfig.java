@@ -44,9 +44,9 @@ public class SecurityConfig {
                 // 配置请求授权规则
                 .authorizeHttpRequests(auth -> auth
                         // 允许登录接口匿名访问
-                        .requestMatchers("/user/login").permitAll()
+                        .requestMatchers("/api/user/login", "/user/login").permitAll()
                         // 允许注册接口匿名访问
-                        .requestMatchers("/user/add").permitAll()
+                        .requestMatchers("/api/user/add", "/user/add").permitAll()
                         // 允许 Swagger 相关路径匿名访问
                         .requestMatchers(
                                 "/v3/api-docs/**",

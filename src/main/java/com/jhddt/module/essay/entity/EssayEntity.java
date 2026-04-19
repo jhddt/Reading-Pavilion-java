@@ -70,6 +70,13 @@ public class EssayEntity {
     private String finalContent;
 
     /**
+     * 美化后的作文内容
+     */
+    @Schema(description = "美化后的作文内容", example = "经过润色排版后的作文内容...")
+    @TableField("beautified_content")
+    private String beautifiedContent;
+
+    /**
      * 字数统计
      */
     @Schema(description = "字数统计", example = "800")

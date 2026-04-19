@@ -94,6 +94,66 @@ public class ReviewRecordDetailVO {
     private LocalDateTime createTime;
 
     /**
+     * 本次批改使用的细则ID
+     */
+    @Schema(description = "本次批改使用的细则ID")
+    private Long ruleId;
+
+    /**
+     * 本次批改使用的细则名称
+     */
+    @Schema(description = "本次批改使用的细则名称")
+    private String ruleName;
+
+    /**
+     * 批改类型
+     */
+    @Schema(description = "批改类型")
+    private String reviewType;
+
+    /**
+     * 适用学段
+     */
+    @Schema(description = "适用学段")
+    private String gradeLevel;
+
+    /**
+     * 题目要求
+     */
+    @Schema(description = "题目要求")
+    private String topicRequirement;
+
+    /**
+     * 润色等级
+     */
+    @Schema(description = "润色等级")
+    private String beautifyLevel;
+
+    /**
+     * 自定义要求
+     */
+    @Schema(description = "自定义要求")
+    private String customRequirement;
+
+    /**
+     * 扣分细则
+     */
+    @Schema(description = "扣分细则")
+    private String deductionDetail;
+
+    /**
+     * 该作文的第几次批改
+     */
+    @Schema(description = "该作文的第几次批改")
+    private Integer reviewVersion;
+
+    /**
+     * 是否为当前最新批改
+     */
+    @Schema(description = "是否为当前最新批改")
+    private Boolean latestVersion;
+
+    /**
      * 各维度得分列表
      */
     @Schema(description = "各维度得分列表")

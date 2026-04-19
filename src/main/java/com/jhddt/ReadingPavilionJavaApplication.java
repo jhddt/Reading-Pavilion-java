@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 @SpringBootApplication
-@MapperScan("com.jhddt.module.*.mapper")
+@MapperScan({"com.jhddt.module.*.mapper", "com.jhddt.common.audit"})
 @EnableAsync
 public class ReadingPavilionJavaApplication {
 

@@ -1,10 +1,15 @@
 package com.jhddt.module.file.controller;
 
 import com.jhddt.common.result.Result;
+import com.jhddt.common.security.CurrentUser;
+import com.jhddt.module.essay.entity.EssayEntity;
 import com.jhddt.module.essay.service.MinioService;
+import com.jhddt.module.essay.service.EssayService;
+import com.jhddt.module.file.entity.FileEntity;
 import com.jhddt.module.file.entity.OcrRecordEntity;
 import com.jhddt.module.file.entity.OcrTextBlockEntity;
 import com.jhddt.module.file.mapper.OcrTextBlockMapper;
+import com.jhddt.module.file.service.FileService;
 import com.jhddt.module.file.service.OcrRecordService;
 import com.jhddt.module.file.vo.OcrRecordDetailVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +20,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,12 +34,16 @@ import java.util.Map;
 @Tag(name = "OCR管理", description = "OCR识别记录查询接口")
 @RestController
 @RequestMapping("/ocr")
+@PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
 @RequiredArgsConstructor
 public class OcrController {
 
     private final OcrRecordService ocrRecordService;
     private final MinioService minioService;
     private final OcrTextBlockMapper ocrTextBlockMapper;
+    private final EssayService essayService;
+    private final FileService fileService;
+    private final CurrentUser currentUser;
 
     /**
      * 获取 OCR 记录详情
@@ -51,10 +61,13 @@ public class OcrController {
             @Parameter(description = "OCR记录ID", required = true, example = "1") 
             @PathVariable Long ocrId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
         OcrRecordEntity ocrRecord = ocrRecordService.getById(ocrId);
         if (ocrRecord == null) {
             return Result.error("OCR记录不存在");
+        }
+        if (!canAccessOcrRecord(ocrRecord, userId)) {
+            return Result.error("无权访问该OCR记录");
         }
 
         return Result.success(ocrRecord);
@@ -76,10 +89,13 @@ public class OcrController {
             @Parameter(description = "OCR记录ID", required = true, example = "1") 
             @PathVariable Long ocrId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
         OcrRecordEntity ocrRecord = ocrRecordService.getById(ocrId);
         if (ocrRecord == null) {
             return Result.error("OCR记录不存在");
+        }
+        if (!canAccessOcrRecord(ocrRecord, userId)) {
+            return Result.error("无权访问该OCR记录");
         }
 
         // 查询文本块列表
@@ -122,10 +138,13 @@ public class OcrController {
             @Parameter(description = "OCR记录ID", required = true, example = "1") 
             @PathVariable Long ocrId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
         OcrRecordEntity ocrRecord = ocrRecordService.getById(ocrId);
         if (ocrRecord == null) {
             return Result.error("OCR记录不存在");
+        }
+        if (!canAccessOcrRecord(ocrRecord, userId)) {
+            return Result.error("无权访问该OCR记录");
         }
 
         if (ocrRecord.getResultImagePath() == null || ocrRecord.getResultImagePath().isEmpty()) {
@@ -158,7 +177,10 @@ public class OcrController {
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long essayId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
+        if (!canAccessEssay(essayId, userId)) {
+            return Result.error("无权访问该作文的OCR记录");
+        }
         OcrRecordEntity ocrRecord = ocrRecordService.getLatestByEssayId(essayId);
         if (ocrRecord == null) {
             return Result.error("该作文没有OCR记录");
@@ -183,7 +205,10 @@ public class OcrController {
             @Parameter(description = "文件ID", required = true, example = "1") 
             @PathVariable Long fileId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
+        if (!canAccessFile(fileId, userId)) {
+            return Result.error("无权访问该文件的OCR记录");
+        }
         OcrRecordEntity ocrRecord = ocrRecordService.getByFileId(fileId);
         if (ocrRecord == null) {
             return Result.error("该文件没有OCR记录");
@@ -208,7 +233,10 @@ public class OcrController {
             @Parameter(description = "作文ID", required = true, example = "100") 
             @PathVariable Long essayId,
             Authentication authentication) {
-        
+        Long userId = currentUser.id(authentication);
+        if (!canAccessEssay(essayId, userId)) {
+            return Result.error("无权访问该作文的OCR记录");
+        }
         OcrRecordEntity ocrRecord = ocrRecordService.getLatestByEssayId(essayId);
         if (ocrRecord == null) {
             return Result.error("该作文没有OCR记录");
@@ -228,5 +256,25 @@ public class OcrController {
         response.put("accuracy", ocrRecord.getAccuracy() != null ? ocrRecord.getAccuracy().toString() : null);
 
         return Result.success(response);
+    }
+
+    private boolean canAccessOcrRecord(OcrRecordEntity ocrRecord, Long userId) {
+        if (ocrRecord == null || userId == null) {
+            return false;
+        }
+        if (ocrRecord.getEssayId() != null && canAccessEssay(ocrRecord.getEssayId(), userId)) {
+            return true;
+        }
+        return ocrRecord.getFileId() != null && canAccessFile(ocrRecord.getFileId(), userId);
+    }
+
+    private boolean canAccessEssay(Long essayId, Long userId) {
+        EssayEntity essay = essayService.getById(essayId);
+        return essay != null && userId.equals(essay.getUserId());
+    }
+
+    private boolean canAccessFile(Long fileId, Long userId) {
+        FileEntity file = fileService.getById(fileId);
+        return file != null && userId.equals(file.getUserId());
     }
 }

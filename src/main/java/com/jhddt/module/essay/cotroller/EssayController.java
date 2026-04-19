@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.jhddt.common.enums.EssayStatus;
 import com.jhddt.common.enums.SubmitType;
 import com.jhddt.common.result.Result;
+import com.jhddt.common.security.CurrentUser;
 import com.jhddt.module.essay.dto.CreateTextEssayRequest;
 import com.jhddt.module.essay.dto.OcrResult;
 import com.jhddt.module.essay.entity.EssayEntity;
@@ -24,7 +25,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -35,6 +38,7 @@ import java.util.List;
 @Tag(name = "作文管理", description = "作文相关接口")
 @RestController
 @RequestMapping("/essay")
+@PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
 @RequiredArgsConstructor
 public class EssayController {
 
@@ -45,6 +49,7 @@ public class EssayController {
     private final FileService fileService;
     private final OcrRecordService ocrRecordService;
     private final OcrTextBlockMapper ocrTextBlockMapper;
+    private final CurrentUser currentUser;
 
     /**
      * 1. 纯文本创建草稿
@@ -88,7 +93,7 @@ public class EssayController {
             )
             @RequestBody CreateTextEssayRequest request, 
             Authentication authentication) {
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         EssayEntity essay = EssayEntity.builder()
                 .userId(userId)
@@ -96,6 +101,9 @@ public class EssayController {
                 .submitType(SubmitType.TEXT)
                 .originalContent(request.getContent())
                 .finalContent(request.getContent())
+                .beautifiedContent(request.getBeautifiedContent() != null && !request.getBeautifiedContent().isBlank()
+                        ? request.getBeautifiedContent()
+                        : request.getContent())
                 .wordCount(request.getContent().length())
                 .status(EssayStatus.DRAFT)
                 .build();
@@ -149,7 +157,7 @@ public class EssayController {
             ) @RequestParam("file") MultipartFile[] files,
             Authentication authentication) {
 
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         if (files == null || files.length == 0) {
             return Result.error("请至少上传一张图片");
@@ -289,6 +297,7 @@ public class EssayController {
         essay.setSourceFilePath(firstSourcePath);
         essay.setOriginalContent(finalText);
         essay.setFinalContent(finalText);
+        essay.setBeautifiedContent(finalText);
         essay.setWordCount(finalText.length());
         essayService.updateById(essay);
 
@@ -339,7 +348,7 @@ public class EssayController {
             ) @RequestParam("file") MultipartFile file,
             Authentication authentication) {
         
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 1. 存储文档到 MinIO
         String documentPath = fileStorageService.storeDocument(file, userId);
@@ -371,6 +380,7 @@ public class EssayController {
         // 5. 更新作文内容
         essay.setOriginalContent(parsedText);
         essay.setFinalContent(parsedText);
+        essay.setBeautifiedContent(parsedText);
         essay.setWordCount(parsedText.length());
         essayService.updateById(essay);
 
@@ -410,7 +420,7 @@ public class EssayController {
             @RequestBody EssayEntity essay, 
             Authentication authentication) {
         // 从 token 中获取用户ID
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
         
         // 清空 ID，让数据库自动生成
         essay.setId(null);
@@ -457,7 +467,7 @@ public class EssayController {
             )
             @RequestBody EssayEntity essay,
             Authentication authentication) {
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 校验作文是否属于当前用户
         EssayEntity existingEssay = essayService.getById(id);
@@ -502,7 +512,7 @@ public class EssayController {
             @PathVariable Long id,
             Authentication authentication) {
         try {
-            Long userId = (Long) authentication.getPrincipal();
+            Long userId = currentUser.id(authentication);
             essayService.submitEssay(id, userId);
             return Result.success();
         } catch (Exception e) {
@@ -528,7 +538,7 @@ public class EssayController {
             @PathVariable Long id,
             Authentication authentication) {
         try {
-            Long userId = (Long) authentication.getPrincipal();
+            Long userId = currentUser.id(authentication);
             essayService.withdrawEssay(id, userId);
             return Result.success();
         } catch (Exception e) {
@@ -585,12 +595,14 @@ public class EssayController {
             @Parameter(description = "作文状态筛选（可选）：0-草稿，1-已提交，2-批改中，3-已批改，4-已归档", example = "0") 
             @RequestParam(required = false) Integer status,
             Authentication authentication) {
-        
-        Long userId = (Long) authentication.getPrincipal();
-        
-        // 调用 Service 层分页查询
-        Page<EssayEntity> result = essayService.pageByUserId(userId, page, pageSize, status);
-        
+
+        Long userId = currentUser.id(authentication);
+        boolean isTeacherOrAdmin = hasTeacherOrAdmin(authentication);
+
+        Page<EssayEntity> result = isTeacherOrAdmin
+                ? essayService.pageForTeacherOrAdmin(page, pageSize, status)
+                : essayService.pageByUserId(userId, page, pageSize, status);
+
         return Result.success(result);
     }
 
@@ -616,7 +628,7 @@ public class EssayController {
             @PathVariable Long id,
             Authentication authentication) {
         
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 根据 id 查询
         EssayEntity essay = essayService.getById(id);
@@ -625,11 +637,24 @@ public class EssayController {
         }
 
         // 校验归属：user_id = 当前用户
-        if (!essay.getUserId().equals(userId)) {
+        if (!essay.getUserId().equals(userId) && !hasTeacherOrAdmin(authentication)) {
             return Result.error("无权查看此作文");
         }
 
         return Result.success(essay);
+    }
+
+    private boolean hasTeacherOrAdmin(Authentication authentication) {
+        if (authentication == null || authentication.getAuthorities() == null) {
+            return false;
+        }
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(authority ->
+                        "ROLE_TEACHER".equals(authority)
+                                || "ROLE_ADMIN".equals(authority)
+                                || "ROLE_2".equals(authority)
+                                || "ROLE_3".equals(authority));
     }
 
     /**
@@ -650,7 +675,7 @@ public class EssayController {
             @PathVariable Long id,
             Authentication authentication) {
         
-        Long userId = (Long) authentication.getPrincipal();
+        Long userId = currentUser.id(authentication);
 
         // 查询作文
         EssayEntity essay = essayService.getById(id);

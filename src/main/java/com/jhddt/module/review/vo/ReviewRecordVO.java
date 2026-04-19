@@ -66,4 +66,22 @@ public class ReviewRecordVO {
 
     @Schema(description = "作文提交类型：0-图片，1-文档，2-文本")
     private Integer submitType;
+
+    @Schema(description = "本次批改使用的细则ID")
+    private Long ruleId;
+
+    @Schema(description = "本次批改使用的细则名称")
+    private String ruleName;
+
+    @Schema(description = "批改类型")
+    private String reviewType;
+
+    @Schema(description = "适用学段")
+    private String gradeLevel;
+
+    @Schema(description = "该作文的第几次批改")
+    private Integer reviewVersion;
+
+    @Schema(description = "是否为该作文当前最新批改")
+    private Boolean latestVersion;
 }

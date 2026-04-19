@@ -13,10 +13,10 @@
             keyProperty="reviewId"
             keyColumn="review_id">
         INSERT INTO review_record
-        (essay_id, task_id, rule_version, reviewer_type, reviewer_id, model_version,
+        (essay_id, task_id, batch_task_id, source_review_id, rule_version, reviewer_type, reviewer_id, model_version,
          start_time, end_time, total_score, status, error_msg, retry_count, is_deleted)
         VALUES
-        (#{essayId}, #{taskId}, #{ruleVersion}, #{reviewerType}, #{reviewerId}, #{modelVersion},
+        (#{essayId}, #{taskId}, #{batchTaskId}, #{sourceReviewId}, #{ruleVersion}, #{reviewerType}, #{reviewerId}, #{modelVersion},
          #{startTime}, #{endTime}, #{totalScore}, #{status}, #{errorMsg}, #{retryCount}, 0)
     </insert>
 
@@ -26,6 +26,8 @@
         <set>
             <if test="essayId != null">essay_id = #{essayId},</if>
             <if test="taskId != null">task_id = #{taskId},</if>
+            <if test="batchTaskId != null">batch_task_id = #{batchTaskId},</if>
+            <if test="sourceReviewId != null">source_review_id = #{sourceReviewId},</if>
             <if test="ruleVersion != null">rule_version = #{ruleVersion},</if>
             <if test="reviewerType != null">reviewer_type = #{reviewerType},</if>
             <if test="reviewerId != null">reviewer_id = #{reviewerId},</if>
@@ -48,6 +50,8 @@
             rr.review_id,
             rr.essay_id,
             rr.task_id,
+            rr.batch_task_id,
+            rr.source_review_id,
             rr.rule_version,
             rr.reviewer_type,
             rr.reviewer_id,
@@ -74,6 +78,8 @@
             rr.review_id,
             rr.essay_id,
             rr.task_id,
+            rr.batch_task_id,
+            rr.source_review_id,
             rr.rule_version,
             rr.reviewer_type,
             rr.reviewer_id,
@@ -100,6 +106,8 @@
             rr.review_id,
             rr.essay_id,
             rr.task_id,
+            rr.batch_task_id,
+            rr.source_review_id,
             rr.rule_version,
             rr.reviewer_type,
             rr.reviewer_id,
@@ -131,6 +139,8 @@
             rr.review_id,
             rr.essay_id,
             rr.task_id,
+            rr.batch_task_id,
+            rr.source_review_id,
             rr.rule_version,
             rr.reviewer_type,
             rr.reviewer_id,
@@ -147,7 +157,12 @@
         FROM review_record rr
                  LEFT JOIN essay e ON rr.essay_id = e.essay_id
         WHERE rr.is_deleted = 0
+        <if test="userId != null">
           AND e.user_id = #{userId}
+        </if>
+        <if test="essayId != null">
+            AND rr.essay_id = #{essayId}
+        </if>
         <if test="status != null">
             AND rr.status = #{status}
         </if>
@@ -161,6 +176,45 @@
         UPDATE review_record
         SET is_deleted = 1
         WHERE review_id = #{reviewId} AND is_deleted = 0
+    </update>
+
+    <select id="selectBatchTaskById"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.BatchReviewTaskEntity">
+        SELECT task_id, creator_id, rule_id, total_count, success_count, fail_count,
+               status, error_msg, start_time, end_time, create_time, update_time, is_deleted
+        FROM batch_review_task
+        WHERE task_id = #{taskId} AND is_deleted = 0
+    </select>
+
+    <insert id="insertBatchTask"
+            parameterType="com.jhddt.module.review.entity.BatchReviewTaskEntity"
+            useGeneratedKeys="true"
+            keyProperty="taskId"
+            keyColumn="task_id">
+        INSERT INTO batch_review_task
+        (creator_id, rule_id, total_count, success_count, fail_count, status, error_msg, start_time, end_time, is_deleted)
+        VALUES
+        (#{creatorId}, #{ruleId}, #{totalCount}, #{successCount}, #{failCount}, #{status}, #{errorMsg}, #{startTime}, #{endTime}, 0)
+    </insert>
+
+    <update id="updateBatchTaskById"
+            parameterType="com.jhddt.module.review.entity.BatchReviewTaskEntity">
+        UPDATE batch_review_task
+        <set>
+            <if test="creatorId != null">creator_id = #{creatorId},</if>
+            <if test="ruleId != null">rule_id = #{ruleId},</if>
+            <if test="totalCount != null">total_count = #{totalCount},</if>
+            <if test="successCount != null">success_count = #{successCount},</if>
+            <if test="failCount != null">fail_count = #{failCount},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="errorMsg != null">error_msg = #{errorMsg},</if>
+            <if test="startTime != null">start_time = #{startTime},</if>
+            <if test="endTime != null">end_time = #{endTime},</if>
+            update_time = NOW(),
+            is_deleted = 0
+        </set>
+        WHERE task_id = #{taskId} AND is_deleted = 0
     </update>
 
     <!-- =========================
@@ -206,29 +260,143 @@
     </select>
 
     <!-- =========================
+         review_rule
+         ========================= -->
+
+    <select id="selectAllRules"
+            resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
+        SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               status, create_time, update_time, is_deleted
+        FROM review_rule
+        WHERE is_deleted = 0
+        ORDER BY status DESC, update_time DESC, rule_id DESC
+    </select>
+
+    <select id="selectEnabledRules"
+            resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
+        SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               status, create_time, update_time, is_deleted
+        FROM review_rule
+        WHERE status = 1 AND is_deleted = 0
+        ORDER BY update_time DESC, rule_id DESC
+    </select>
+
+    <select id="selectRuleById"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
+        SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               status, create_time, update_time, is_deleted
+        FROM review_rule
+        WHERE rule_id = #{id} AND is_deleted = 0
+    </select>
+
+    <select id="selectActiveRule"
+            resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
+        SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               status, create_time, update_time, is_deleted
+        FROM review_rule
+        WHERE status = 1 AND is_deleted = 0
+        ORDER BY update_time DESC, rule_id DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertRule"
+            parameterType="com.jhddt.module.review.entity.ReviewRuleEntity"
+            useGeneratedKeys="true"
+            keyProperty="ruleId"
+            keyColumn="rule_id">
+        INSERT INTO review_rule
+        (rule_name, review_type, grade_level, prompt_template, topic_requirement,
+         beautify_level, custom_requirement, deduction_detail, status, is_deleted)
+        VALUES
+        (#{ruleName}, #{reviewType}, #{gradeLevel}, #{promptTemplate}, #{topicRequirement},
+         #{beautifyLevel}, #{customRequirement}, #{deductionDetail}, #{status}, 0)
+    </insert>
+
+    <update id="updateRuleById"
+            parameterType="com.jhddt.module.review.entity.ReviewRuleEntity">
+        UPDATE review_rule
+        <set>
+            <if test="ruleName != null">rule_name = #{ruleName},</if>
+            <if test="reviewType != null">review_type = #{reviewType},</if>
+            <if test="gradeLevel != null">grade_level = #{gradeLevel},</if>
+            <if test="promptTemplate != null">prompt_template = #{promptTemplate},</if>
+            <if test="topicRequirement != null">topic_requirement = #{topicRequirement},</if>
+            <if test="beautifyLevel != null">beautify_level = #{beautifyLevel},</if>
+            <if test="customRequirement != null">custom_requirement = #{customRequirement},</if>
+            <if test="deductionDetail != null">deduction_detail = #{deductionDetail},</if>
+            <if test="status != null">status = #{status},</if>
+            is_deleted = 0,
+            update_time = NOW()
+        </set>
+        WHERE rule_id = #{ruleId} AND is_deleted = 0
+    </update>
+
+    <update id="updateRuleStatus">
+        UPDATE review_rule
+        SET status = #{status},
+            update_time = NOW()
+        WHERE rule_id = #{id} AND is_deleted = 0
+    </update>
+
+    <update id="deleteRuleLogic">
+        UPDATE review_rule
+        SET is_deleted = 1,
+            update_time = NOW()
+        WHERE rule_id = #{id} AND is_deleted = 0
+    </update>
+
+    <!-- =========================
          score_dimension
          ========================= -->
 
     <select id="selectAllDimensions"
             resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
-        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        SELECT dimension_id, rule_id, dimension_name, weight, max_score, description,
+               sort_order, status, create_time, is_deleted
         FROM score_dimension
         WHERE is_deleted = 0
-        ORDER BY dimension_id ASC
+        ORDER BY COALESCE(rule_id, 0) ASC, sort_order ASC, dimension_id ASC
     </select>
 
     <select id="selectEnabledDimensions"
             resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
-        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        SELECT dimension_id, rule_id, dimension_name, weight, max_score, description,
+               sort_order, status, create_time, is_deleted
         FROM score_dimension
         WHERE status = 1 AND is_deleted = 0
-        ORDER BY dimension_id ASC
+        ORDER BY COALESCE(rule_id, 0) ASC, sort_order ASC, dimension_id ASC
+    </select>
+
+    <select id="selectDimensionsByRuleId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        SELECT dimension_id, rule_id, dimension_name, weight, max_score, description,
+               sort_order, status, create_time, is_deleted
+        FROM score_dimension
+        WHERE rule_id = #{ruleId} AND is_deleted = 0
+        ORDER BY sort_order ASC, dimension_id ASC
+    </select>
+
+    <select id="selectEnabledDimensionsByRuleId"
+            parameterType="long"
+            resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
+        SELECT dimension_id, rule_id, dimension_name, weight, max_score, description,
+               sort_order, status, create_time, is_deleted
+        FROM score_dimension
+        WHERE rule_id = #{ruleId} AND status = 1 AND is_deleted = 0
+        ORDER BY sort_order ASC, dimension_id ASC
     </select>
 
     <select id="selectDimensionById"
             parameterType="long"
             resultType="com.jhddt.module.review.entity.ScoreDimensionEntity">
-        SELECT dimension_id, dimension_name, weight, max_score, status, create_time, is_deleted
+        SELECT dimension_id, rule_id, dimension_name, weight, max_score, description,
+               sort_order, status, create_time, is_deleted
         FROM score_dimension
         WHERE dimension_id = #{id} AND is_deleted = 0
     </select>
@@ -238,17 +406,22 @@
             useGeneratedKeys="true"
             keyProperty="dimensionId"
             keyColumn="dimension_id">
-        INSERT INTO score_dimension (dimension_name, weight, max_score, status, is_deleted)
-        VALUES (#{dimensionName}, #{weight}, #{maxScore}, #{status}, 0)
+        INSERT INTO score_dimension
+        (rule_id, dimension_name, weight, max_score, description, sort_order, status, is_deleted)
+        VALUES
+        (#{ruleId}, #{dimensionName}, #{weight}, #{maxScore}, #{description}, #{sortOrder}, #{status}, 0)
     </insert>
 
     <update id="updateDimensionById"
             parameterType="com.jhddt.module.review.entity.ScoreDimensionEntity">
         UPDATE score_dimension
         <set>
+            <if test="ruleId != null">rule_id = #{ruleId},</if>
             <if test="dimensionName != null">dimension_name = #{dimensionName},</if>
             <if test="weight != null">weight = #{weight},</if>
             <if test="maxScore != null">max_score = #{maxScore},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="sortOrder != null">sort_order = #{sortOrder},</if>
             <if test="status != null">status = #{status},</if>
             is_deleted = 0
         </set>

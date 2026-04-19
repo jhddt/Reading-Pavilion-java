@@ -1,5 +1,6 @@
 package com.jhddt.config.security;
 
+import com.jhddt.common.security.RoleConstants;
 import com.jhddt.common.util.JwtUtil;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -16,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import io.jsonwebtoken.Claims;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.List;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
 
@@ -67,13 +69,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 
                 log.debug("JWT Filter - Token 验证成功，用户ID: {}, 用户名: {}, 角色: {}", userId, userName, role);
 
-                // 6. 创建认证对象（包含用户信息和权限）
-                SimpleGrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + role);
+                // 6. 创建认证对象（保留兼容 ROLE_数字，同时补充可读角色名 ROLE_ADMIN 等）
+                SimpleGrantedAuthority legacyAuthority = new SimpleGrantedAuthority("ROLE_" + role);
+                SimpleGrantedAuthority namedAuthority = new SimpleGrantedAuthority("ROLE_" + RoleConstants.fromRoleCode(role));
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
                                 userId,                                    // 主体：用户ID
                                 null,                                      // 凭证：不需要密码
-                                Collections.singletonList(authority)       // 权限列表
+                                List.of(legacyAuthority, namedAuthority)   // 权限列表
                         );
 
                 // 7. 将认证信息设置到 Spring Security 上下文中

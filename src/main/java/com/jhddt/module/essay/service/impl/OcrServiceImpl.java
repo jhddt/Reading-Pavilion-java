@@ -7,6 +7,7 @@ import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.*;
@@ -28,6 +29,7 @@ public class OcrServiceImpl implements OcrService {
     private final RestTemplate restTemplate;
     private final MinioClient minioClient;
     private final MinioConfig minioConfig;
+    private final ObjectMapper objectMapper;
 
     @Value("${ocr.service.url}")
     private String ocrServiceUrl;
@@ -68,8 +70,7 @@ public class OcrServiceImpl implements OcrService {
 
             // 4. 调用 FastAPI OCR 服务
             log.info("调用 OCR 服务: {}", ocrServiceUrl + "/ocr");
-            
-            // 先获取原始响应
+
             ResponseEntity<String> rawResponse = restTemplate.postForEntity(
                     ocrServiceUrl + "/ocr",
                     requestEntity,
@@ -88,16 +89,12 @@ public class OcrServiceImpl implements OcrService {
                 log.info("包含 imageInfo: {}", rawJson.contains("imageInfo"));
             }
             
-            // 再解析为对象
-            ResponseEntity<OcrResult> response = restTemplate.postForEntity(
-                    ocrServiceUrl + "/ocr",
-                    requestEntity,
-                    OcrResult.class
-            );
+            OcrResult result = rawJson != null && !rawJson.isBlank()
+                    ? objectMapper.readValue(rawJson, OcrResult.class)
+                    : null;
 
             // 5. 解析响应
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                OcrResult result = response.getBody();
+            if (rawResponse.getStatusCode() == HttpStatus.OK && result != null) {
                 log.info("OCR 解析结果:");
                 log.info("  text: {}", result.getText() != null ? "存在" : "null");
                 log.info("  accuracy: {}", result.getAccuracy());

@@ -31,6 +31,16 @@ public interface EssayService extends IService<EssayEntity> {
     Page<EssayEntity> pageByUserId(Long userId, Integer page, Integer pageSize, Integer status);
 
     /**
+     * 分页查询老师/管理员可见作文（默认仅已提交及之后状态）
+     *
+     * @param page 页码
+     * @param pageSize 每页数量
+     * @param status 作文状态（可选）
+     * @return 分页结果
+     */
+    Page<EssayEntity> pageForTeacherOrAdmin(Integer page, Integer pageSize, Integer status);
+
+    /**
      * 提交作文（修改状态）
      *
      * @param essayId 作文ID
