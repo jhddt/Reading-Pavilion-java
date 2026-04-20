@@ -27,7 +27,7 @@ type Annotation =
       originalText?: string
     }
 
-const CHARS_PER_LINE = 20
+const CHARS_PER_LINE = 30
 /** 正文段首行缩进格数（不占原文 offset，批注仍按原文索引匹配） */
 const FIRST_LINE_INDENT_CELLS = 2
 const BODY_FIRST_ROW_CHARS = CHARS_PER_LINE - FIRST_LINE_INDENT_CELLS
@@ -110,22 +110,33 @@ function extractHighlightEntries(raw: string): Array<{ quote: string; note: stri
   const text = normalizeLineBreaks(raw || '').trim()
   if (!text) return []
 
-  const normalized = text.replace(/\s*(\d+[\.、]\s*\*\*[“"])/g, '\n$1').trim()
+  // 先按序号分条（避免“裁切过多”把后续条目吞进去）
+  const normalized = text.replace(/\s*(\d+[\.、]\s*)/g, '\n$1').trim()
+  const parts = normalized
+    .split(/\n\s*(?=\d+[\.、]\s*)/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
   const entries: Array<{ quote: string; note: string }> = []
   const seen = new Set<string>()
-  const itemRegex =
-    /(?:^|\n)\s*(?:\d+[\.、]\s*)?\*\*[“"]([^”"]{3,})[”"]\*\*\s*[-—:：]?\s*([\s\S]*?)(?=(?:\n\s*\d+[\.、]\s*\*\*[“"])|$)/g
+  const quoteSingle = /\*\*[“"]([^”"]{3,})[”"]\*\*|[“"]([^”"]{3,})[”"]/u
 
-  for (const match of normalized.matchAll(itemRegex)) {
-    const quote = (match[1] || '').trim()
-    const note = (match[2] || '').trim()
+  for (const part0 of parts.length ? parts : [normalized]) {
+    const part = part0.replace(/^\d+[\.、]\s*/g, '').trim()
+    const m = part.match(quoteSingle)
+    if (!m) continue
+    const quote = ((m[1] || m[2]) ?? '').trim()
     if (!quote || seen.has(quote)) continue
+    const idx = m.index ?? -1
+    const after = idx >= 0 ? part.slice(idx + m[0].length) : ''
+    const note = after.replace(/^\s*[-—:：]\s*/g, '').trim()
     seen.add(quote)
     entries.push({ quote, note })
   }
 
   if (entries.length) return entries
 
+  // 兜底：只提取引号句
   const quoteRegex = /[“"]([^”"]{3,})[”"]/g
   for (const match of text.matchAll(quoteRegex)) {
     const quote = (match[1] || '').trim()
@@ -345,6 +356,8 @@ function buildAnnotations(detail: ReviewDetail, content: string) {
   })
 
   ;(detail.comments || []).forEach((item: ReviewComment, index) => {
+    // 改进建议(2)只在右侧空白位置展示，不进入正文锚点
+    if (item.commentType === 2) return
     const type = commentTypeToAnnotationType(item.commentType)
     if (item.startOffset != null && item.endOffset != null) {
       const range = resolveAnnotationRange(content, item.startOffset, item.endOffset, item.relatedText)
@@ -470,21 +483,31 @@ export function ReviewAnnotationPage() {
   }, [annotations, content])
 
   const paragraphSuggestions = useMemo(() => {
-    const bulkSuggestion = detail?.comments?.find((c) => c.commentType === 2 && (c.startOffset == null || c.endOffset == null))?.content || ''
-    const entries = extractSuggestionEntries(bulkSuggestion)
-    if (!entries.length) return []
+    const suggestions = (detail?.comments || []).filter((c) => c.commentType === 2 && c.content?.trim())
+    if (!suggestions.length) return []
 
-    return entries.map((entry, idx) => {
-      const quoted = firstQuotedSnippet(entry)
-      const snippet = quoted || entry.slice(0, 18)
-      const range = snippet ? resolveAnnotationRange(content, 0, 0, snippet) : { start: 0, end: 0 }
-      const pIdx = paragraphs.findIndex((p) => range.end > p.start && range.start < p.end)
-      return {
-        id: `bulk-s-${idx}`,
-        paragraphIndex: pIdx >= 0 ? pIdx : 0,
-        content: entry,
-      }
+    const rows: Array<{ id: string; paragraphIndex: number; content: string }> = []
+    suggestions.forEach((comment, commentIndex) => {
+      const entries = extractSuggestionEntries(comment.content || '')
+      const items = entries.length ? entries : [comment.content.trim()]
+      items.forEach((entry, entryIndex) => {
+        let range = { start: 0, end: 0 }
+        if (comment.startOffset != null && comment.endOffset != null) {
+          range = resolveAnnotationRange(content, comment.startOffset, comment.endOffset, comment.relatedText || entry)
+        } else {
+          const quoted = firstQuotedSnippet(entry)
+          const snippet = quoted || entry.slice(0, 18)
+          range = snippet ? resolveAnnotationRange(content, 0, 0, snippet) : { start: 0, end: 0 }
+        }
+        const pIdx = paragraphs.findIndex((p) => range.end > p.start && range.start < p.end)
+        rows.push({
+          id: `bulk-s-${commentIndex}-${entryIndex}`,
+          paragraphIndex: pIdx >= 0 ? pIdx : 0,
+          content: entry,
+        })
+      })
     })
+    return rows
   }, [content, detail?.comments, paragraphs])
 
   const paragraphRefs = useRef<Record<number, HTMLElement | null>>({})
@@ -572,7 +595,7 @@ export function ReviewAnnotationPage() {
   )
   /** 右侧浮动区仅展示改进建议、亮点赏析（错字已在正文标出） */
   const sidebarFloatingAnnotations = useMemo(
-    () => annotations.filter((a) => a.type === 'suggestion' || a.type === 'highlight'),
+    () => annotations.filter((a) => a.type === 'highlight'),
     [annotations],
   )
   const sidebarAnnotationNumberMap = useMemo(
@@ -936,13 +959,7 @@ export function ReviewAnnotationPage() {
                           }`}
                           onClick={() => focusAnnotation(annotation.id)}
                         >
-                          <span
-                            className={`annotation-note-index ${
-                              annotation.type === 'suggestion'
-                                ? 'annotation-note-index-suggestion'
-                                : 'annotation-note-index-highlight'
-                            }`}
-                          >
+                          <span className="annotation-note-index annotation-note-index-highlight">
                             {sidebarAnnotationNumberMap[annotation.id] ?? 0}
                           </span>
                           <span>{annotation.content}</span>

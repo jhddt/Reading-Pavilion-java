@@ -8,6 +8,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { login } = useAuth()
+  const [loginRole, setLoginRole] = useState<'STUDENT' | 'TEACHER'>('STUDENT')
   const [userName, setUserName] = useState('')
   const [password, setPassword] = useState('')
   const [registerUserName, setRegisterUserName] = useState('')
@@ -108,6 +109,22 @@ export function LoginPage() {
           <span className="auth-flip-side" />
           <div className="auth-flip-inner">
             <div className="auth-flip-front">
+              <div className="auth-role-toggle" role="group" aria-label="选择身份">
+                <button
+                  type="button"
+                  className={`auth-role-option ${loginRole === 'STUDENT' ? 'auth-role-option-active' : ''}`}
+                  onClick={() => setLoginRole('STUDENT')}
+                >
+                  学生
+                </button>
+                <button
+                  type="button"
+                  className={`auth-role-option ${loginRole === 'TEACHER' ? 'auth-role-option-active' : ''}`}
+                  onClick={() => setLoginRole('TEACHER')}
+                >
+                  老师
+                </button>
+              </div>
               <div className="auth-flip-title">登录 PenPilot</div>
               <form className="auth-flip-form" onSubmit={onSubmit}>
                 <input

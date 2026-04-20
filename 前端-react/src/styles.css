@@ -1750,6 +1750,52 @@ textarea:focus {
   font-size: 18px;
 }
 
+.essay-detail-paper-grid {
+  --essay-detail-cell-size: 24px;
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.essay-detail-paper-paragraph {
+  margin: 0;
+}
+
+.essay-detail-paper-row {
+  display: grid;
+  grid-auto-rows: auto;
+  margin: 0;
+}
+
+.essay-detail-paper-title-row {
+  margin-bottom: 8px;
+}
+
+.essay-detail-paper-cell {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(57, 108, 198, 0.14);
+  font-family: "KaiTi", "STKaiti", serif;
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.9);
+  background: #fff;
+}
+
+.essay-detail-paper-cell-indent {
+  color: transparent;
+}
+
+.essay-detail-paper-cell-title {
+  font-weight: 700;
+  color: rgba(15, 35, 66, 0.92);
+}
+
 .panel-blue {
   background: linear-gradient(180deg, #f7faff, #edf4ff);
 }
@@ -1974,6 +2020,33 @@ textarea:focus {
   font-size: 26px;
   font-weight: 900;
   color: var(--main-color);
+}
+
+.auth-role-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auth-role-option {
+  border: 2px solid var(--main-color);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--font-color);
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 3px 3px var(--main-color);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+
+.auth-role-option:hover {
+  filter: brightness(1.02);
+  transform: translateY(-1px);
+}
+
+.auth-role-option-active {
+  background: rgba(0, 47, 167, 0.1);
 }
 
 .auth-flip-form {
@@ -2538,6 +2611,92 @@ textarea:focus {
 
 .detail-grid {
   align-items: start;
+  row-gap: 14px;
+}
+
+.detail-grid > .stack-list {
+  margin-bottom: 14px;
+}
+
+.detail-grid > .stack-list .action-row .primary-button,
+.detail-grid > .stack-list .action-row .secondary-button,
+.detail-grid > .stack-list .action-row .danger-button {
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.essay-detail-status-pill {
+  margin-left: auto;
+}
+
+.essay-review-config-modal .action-row {
+  margin-top: 12px;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+.essay-review-config-modal .create-mode-tabs {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.essay-review-config-modal .action-row .primary-button,
+.essay-review-config-modal .action-row .secondary-button {
+  min-height: 38px;
+  min-width: 120px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.essay-review-config-modal .action-row .primary-button {
+  background: linear-gradient(180deg, #1f63e0, #174fc4);
+  box-shadow: 0 6px 14px rgba(31, 99, 224, 0.24);
+}
+
+.essay-review-config-modal .action-row .primary-button:hover {
+  filter: brightness(1.03);
+  transform: translateY(-1px);
+}
+
+.essay-review-config-modal .action-row .secondary-button {
+  margin-left: auto;
+  background: #f7faff;
+  border: 1px solid rgba(0, 47, 167, 0.2);
+  color: #234d9b;
+}
+
+.essay-review-config-modal .action-row .secondary-button:hover {
+  background: #eef4ff;
+}
+
+.essay-review-loading-modal {
+  width: min(420px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 26px 24px;
+}
+
+.essay-review-loading-modal h3 {
+  margin: 0;
+}
+
+.essay-review-loading-modal p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.essay-review-loading-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 47, 167, 0.18);
+  border-top-color: #1f63e0;
+  animation: rotate 0.9s linear infinite;
 }
 
 .top-gap {
@@ -2939,7 +3098,7 @@ textarea:focus {
 
 .annotation-report-grid {
   display: grid;
-  grid-template-columns: 530px 320px;
+  grid-template-columns: 760px 320px;
   gap: 18px;
   align-items: start;
 }
@@ -2955,7 +3114,7 @@ textarea:focus {
   gap: 18px;
   padding-right: 6px;
   padding-top: 0;
-  width: 600px;
+  width: 760px;
   max-width: 100%;
 }
 
@@ -2965,7 +3124,7 @@ textarea:focus {
 
 .annotation-paper-report {
   margin-top: 0;
-  --essay-cell-size: 28px;
+  --essay-cell-size: 16px;
   border-color: rgba(57, 108, 198, 0.16);
   font-family: "ZhangHardCopyKaiTi", "FZKai-Z03S", "方正楷体简体", "KaiTi", "楷体", "STKaiti", serif;
   font-size: var(--article-font-size);
@@ -2997,7 +3156,7 @@ textarea:focus {
   border: 1px solid rgba(0, 47, 167, 0.1);
   background: linear-gradient(180deg, #f9fbff, #ffffff);
   box-sizing: border-box;
-  width: calc(var(--essay-cell-size) * 20);
+  width: calc(var(--essay-cell-size) * 30);
   max-width: 100%;
   margin-left: auto;
   margin-right: auto;
@@ -3087,6 +3246,11 @@ textarea:focus {
 
 .annotation-floating-comment-active {
   opacity: 1;
+}
+
+.annotation-floating-comment-list {
+  display: grid;
+  gap: 4px;
 }
 
 .annotation-floating-comment-suggestion {
@@ -3585,6 +3749,10 @@ textarea:focus {
     align-items: flex-start;
   }
 
+  .detail-grid > .stack-list {
+    order: -1;
+  }
+
   .essays-heading-actions {
     width: 100%;
     min-width: 0;
@@ -3648,7 +3816,7 @@ textarea:focus {
   }
 
   .annotation-paper-report {
-    --essay-cell-size: 24px;
+    --essay-cell-size: 15px;
     font-size: 18px;
   }
 
