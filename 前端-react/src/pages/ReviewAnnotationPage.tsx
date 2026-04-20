@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { hasAnyRole } from '../auth/roles'
 import { api } from '../lib/api'
-import { formatDateTime } from '../lib/format'
 import { extractOverallSummaryLead } from '../lib/reviewSummaryText'
 import type { Essay, ReviewComment, ReviewDetail, TextCorrection } from '../types'
 
@@ -20,7 +19,7 @@ type Annotation =
     }
   | {
       id: string
-      type: 'suggestion' | 'revision'
+      type: 'suggestion' | 'revision' | 'highlight'
       start: number
       end: number
       title: string
@@ -107,6 +106,72 @@ function normalizeLineBreaks(text: string) {
   return text.replace(/\r\n?/g, '\n')
 }
 
+function extractHighlightEntries(raw: string): Array<{ quote: string; note: string }> {
+  const text = normalizeLineBreaks(raw || '').trim()
+  if (!text) return []
+
+  const normalized = text.replace(/\s*(\d+[\.、]\s*\*\*[“"])/g, '\n$1').trim()
+  const entries: Array<{ quote: string; note: string }> = []
+  const seen = new Set<string>()
+  const itemRegex =
+    /(?:^|\n)\s*(?:\d+[\.、]\s*)?\*\*[“"]([^”"]{3,})[”"]\*\*\s*[-—:：]?\s*([\s\S]*?)(?=(?:\n\s*\d+[\.、]\s*\*\*[“"])|$)/g
+
+  for (const match of normalized.matchAll(itemRegex)) {
+    const quote = (match[1] || '').trim()
+    const note = (match[2] || '').trim()
+    if (!quote || seen.has(quote)) continue
+    seen.add(quote)
+    entries.push({ quote, note })
+  }
+
+  if (entries.length) return entries
+
+  const quoteRegex = /[“"]([^”"]{3,})[”"]/g
+  for (const match of text.matchAll(quoteRegex)) {
+    const quote = (match[1] || '').trim()
+    if (!quote || seen.has(quote)) continue
+    seen.add(quote)
+    entries.push({ quote, note: '' })
+  }
+  return entries
+}
+
+function extractSuggestionEntries(raw: string): string[] {
+  const text = normalizeLineBreaks(raw || '').trim()
+  if (!text) return []
+  const normalized = text.replace(/\s*(\d+[\.、]\s*)/g, '\n$1').trim()
+  const parts = normalized
+    .split(/\n\s*(?=\d+[\.、]\s*)/g)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  // 去掉开头序号
+  return parts.map((s) => s.replace(/^\d+[\.、]\s*/g, '').trim()).filter(Boolean)
+}
+
+function firstQuotedSnippet(text: string) {
+  const m = text.match(/[“"]([^”"]{3,})[”"]/)
+  return m?.[1]?.trim() || ''
+}
+
+/** 错字格：正字写在错字上方；每个字独立渲染为 span */
+function correctionAboveChars(annotation: Annotation, cellIndex: number): string[] {
+  if (annotation.type !== 'correction') return []
+  const raw = annotation.correctedText?.trim()
+  if (!raw) return []
+  const spanLen = Math.max(1, annotation.end - annotation.start)
+  const seq = Array.from(raw)
+  const offset = cellIndex - annotation.start
+  if (offset < 0 || offset >= spanLen) return []
+  if (seq.length === spanLen) {
+    const ch = seq[offset]
+    return ch ? [ch] : []
+  }
+  if (cellIndex === annotation.start) {
+    return seq
+  }
+  return []
+}
+
 function splitEssayParagraphs(text: string) {
   const normalized = normalizeLineBreaks(text).trim()
   if (!normalized) return []
@@ -150,6 +215,58 @@ function buildLooseSearchMap(text: string) {
   return { text: chars.join(''), indices }
 }
 
+function buildLooseSearchMapForQuote(text: string) {
+  const chars: string[] = []
+  const indices: number[] = []
+  // 去除空白与常见标点，提高“引用句”匹配成功率
+  const skip = /[\s，。,\.！？!?、：“”‘’（）()【】\[\]《》<>—\-…·]/u
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (!skip.test(char)) {
+      chars.push(char)
+      indices.push(index)
+    }
+  }
+
+  return { text: chars.join(''), indices }
+}
+
+function resolveRangeBySnippet(content: string, snippet: string) {
+  const trimmed = snippet.trim()
+  if (!trimmed) return { start: 0, end: 0 }
+
+  const exactIndex = content.indexOf(trimmed)
+  if (exactIndex >= 0) {
+    return { start: exactIndex, end: exactIndex + trimmed.length }
+  }
+
+  const looseSnippet = trimmed.replace(/\s+/g, '')
+  if (!looseSnippet) return { start: 0, end: 0 }
+
+  // 先用“仅去空白”的方式兜底
+  const looseWindow = buildLooseSearchMap(content)
+  let looseIndex = looseWindow.text.indexOf(looseSnippet)
+  if (looseIndex >= 0) {
+    const resolvedStart = looseWindow.indices[looseIndex]
+    const resolvedEndIndex = looseWindow.indices[looseIndex + looseSnippet.length - 1]
+    return { start: resolvedStart, end: resolvedEndIndex + 1 }
+  }
+
+  // 再用“去空白 + 去标点”的方式匹配引用句
+  const quoteSnippet = trimmed.replace(/[\s，。,\.！？!?、：“”‘’（）()【】\[\]《》<>—\-…·]+/gu, '')
+  if (!quoteSnippet) return { start: 0, end: 0 }
+  const quoteWindow = buildLooseSearchMapForQuote(content)
+  looseIndex = quoteWindow.text.indexOf(quoteSnippet)
+  if (looseIndex >= 0) {
+    const resolvedStart = quoteWindow.indices[looseIndex]
+    const resolvedEndIndex = quoteWindow.indices[looseIndex + quoteSnippet.length - 1]
+    return { start: resolvedStart, end: resolvedEndIndex + 1 }
+  }
+
+  return { start: 0, end: 0 }
+}
+
 function resolveAnnotationRange(content: string, start: number, end: number, sourceText?: string) {
   const safeStart = Math.max(0, Math.min(start, content.length))
   const safeEnd = Math.max(safeStart, Math.min(end, content.length))
@@ -169,6 +286,12 @@ function resolveAnnotationRange(content: string, start: number, end: number, sou
     if (content.slice(candidate.start, candidate.end) === snippet) {
       return candidate
     }
+  }
+
+  // 无起止坐标时（如亮点赏析逐条回贴），直接全篇检索
+  if (safeStart === safeEnd) {
+    const ranged = resolveRangeBySnippet(content, snippet)
+    if (ranged.end > ranged.start) return ranged
   }
 
   const windowStart = Math.max(0, safeStart - 160)
@@ -222,17 +345,38 @@ function buildAnnotations(detail: ReviewDetail, content: string) {
   })
 
   ;(detail.comments || []).forEach((item: ReviewComment, index) => {
-    if (item.startOffset == null || item.endOffset == null) return
-    const range = resolveAnnotationRange(content, item.startOffset, item.endOffset, item.relatedText)
-    annotations.push({
-      id: `m-${index}`,
-      type: commentTypeToAnnotationType(item.commentType),
-      start: range.start,
-      end: range.end,
-      title: item.commentType === 2 ? '改进建议' : '修改意见',
-      content: item.content,
-      originalText: item.relatedText,
-    })
+    const type = commentTypeToAnnotationType(item.commentType)
+    if (item.startOffset != null && item.endOffset != null) {
+      const range = resolveAnnotationRange(content, item.startOffset, item.endOffset, item.relatedText)
+      annotations.push({
+        id: `m-${index}`,
+        type,
+        start: range.start,
+        end: range.end,
+        title: item.commentType === 2 ? '改进建议' : item.commentType === 4 ? '亮点赏析' : '修改意见',
+        content: item.content,
+        originalText: item.relatedText,
+      })
+      return
+    }
+
+    // 亮点赏析常为整段无坐标文本：按条目拆分并逐条回贴到正文句子
+    if (item.commentType === 4) {
+      const entries = extractHighlightEntries(item.content || '')
+      entries.forEach((entry, subIndex) => {
+        const range = resolveAnnotationRange(content, 0, 0, entry.quote)
+        if (range.end <= range.start) return
+        annotations.push({
+          id: `m-${index}-h-${subIndex}`,
+          type: 'highlight',
+          start: range.start,
+          end: range.end,
+          title: '亮点赏析',
+          content: entry.note || `亮点句：${entry.quote}`,
+          originalText: entry.quote,
+        })
+      })
+    }
   })
 
   return annotations.sort((a, b) => a.start - b.start)
@@ -255,7 +399,7 @@ export function ReviewAnnotationPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const paperRef = useRef<HTMLDivElement | null>(null)
-  const inlineRefs = useRef<Record<string, HTMLSpanElement | null>>({})
+  const inlineRefs = useRef<Record<string, HTMLElement | null>>({})
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
@@ -292,11 +436,15 @@ export function ReviewAnnotationPage() {
       text: string
       isTitle: boolean
       rows: Array<Array<AnnotationGridCell>>
+      start: number
+      end: number
     }> = []
 
     lines.forEach((line, lineIndex) => {
       const text = line.map((item) => item.char).join('')
       const trimmed = text.trim()
+      const start = line.length ? Math.max(0, line[0].index) : 0
+      const end = line.length ? Math.max(start, line[line.length - 1].index + 1) : start
       const chars = line.map(({ char, index }) => {
         const matched = ranges.find((item) => index >= item.start && index < item.end)
         return {
@@ -313,16 +461,130 @@ export function ReviewAnnotationPage() {
         text,
         isTitle,
         rows,
+        start,
+        end,
       })
     })
 
     return result
   }, [annotations, content])
+
+  const paragraphSuggestions = useMemo(() => {
+    const bulkSuggestion = detail?.comments?.find((c) => c.commentType === 2 && (c.startOffset == null || c.endOffset == null))?.content || ''
+    const entries = extractSuggestionEntries(bulkSuggestion)
+    if (!entries.length) return []
+
+    return entries.map((entry, idx) => {
+      const quoted = firstQuotedSnippet(entry)
+      const snippet = quoted || entry.slice(0, 18)
+      const range = snippet ? resolveAnnotationRange(content, 0, 0, snippet) : { start: 0, end: 0 }
+      const pIdx = paragraphs.findIndex((p) => range.end > p.start && range.start < p.end)
+      return {
+        id: `bulk-s-${idx}`,
+        paragraphIndex: pIdx >= 0 ? pIdx : 0,
+        content: entry,
+      }
+    })
+  }, [content, detail?.comments, paragraphs])
+
+  const paragraphRefs = useRef<Record<number, HTMLElement | null>>({})
+  const paragraphSuggestionRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [paragraphSuggestionTopMap, setParagraphSuggestionTopMap] = useState<Record<string, number>>({})
+
+  useEffect(() => {
+    const rebuild = () => {
+      const paper = paperRef.current
+      if (!paper || !paragraphSuggestions.length) {
+        setParagraphSuggestionTopMap({})
+        return
+      }
+      const paperRect = paper.getBoundingClientRect()
+
+      const desired = paragraphSuggestions
+        .map((s, order) => {
+          const node = paragraphRefs.current[s.paragraphIndex]
+          if (!node) return null
+          const rect = node.getBoundingClientRect()
+          return {
+            ...s,
+            order,
+            desiredTop: Math.max(0, rect.top - paperRect.top - 10),
+          }
+        })
+        .filter(Boolean) as Array<{ id: string; paragraphIndex: number; content: string; desiredTop: number; order: number }>
+
+      // 固定占位块：亮点赏析/可定位批注（这些位置不能动）
+      const fixedBlocks = floatingGroups
+        .map((group) => {
+          const top = floatingTopMap[group.id] ?? group.anchorTop
+          const height = groupRefs.current[group.id]?.offsetHeight || 0
+          return { top, bottom: top + height + 10 }
+        })
+        .filter((b) => b.bottom > b.top)
+        .sort((a, b) => a.top - b.top)
+
+      const overlaps = (top: number, height: number, block: { top: number; bottom: number }) => {
+        const bottom = top + height
+        return top < block.bottom && bottom > block.top
+      }
+
+      const nextAvailableTop = (startTop: number, height: number, occupied: Array<{ top: number; bottom: number }>) => {
+        let top = startTop
+        // 最多尝试若干次，避免死循环
+        for (let i = 0; i < 50; i += 1) {
+          const hit = occupied.find((b) => overlaps(top, height, b))
+          if (!hit) return top
+          top = hit.bottom
+        }
+        return top
+      }
+
+      const next: Record<string, number> = {}
+      const occupied: Array<{ top: number; bottom: number }> = [...fixedBlocks]
+
+      // 按序号从上到下放置；若目标位置在更下方，则从目标位置开始找空位
+      desired
+        .sort((a, b) => a.order - b.order)
+        .forEach((s) => {
+          const h = paragraphSuggestionRefs.current[s.id]?.offsetHeight || 0
+          const height = Math.max(24, h) + 8
+          // 不改变亮点赏析的前提下：从段落目标位置开始，向下找最近空白
+          const top = nextAvailableTop(s.desiredTop, height, occupied)
+          next[s.id] = top
+          occupied.push({ top, bottom: top + height })
+          occupied.sort((a, b) => a.top - b.top)
+        })
+
+      setParagraphSuggestionTopMap(next)
+    }
+
+    const raf = requestAnimationFrame(rebuild)
+    window.addEventListener('resize', rebuild)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', rebuild)
+    }
+  }, [floatingGroups, floatingTopMap, paragraphSuggestions])
   const annotationNumberMap = useMemo(
     () =>
       Object.fromEntries(annotations.map((annotation, index) => [annotation.id, index + 1])),
     [annotations],
   )
+  /** 右侧浮动区仅展示改进建议、亮点赏析（错字已在正文标出） */
+  const sidebarFloatingAnnotations = useMemo(
+    () => annotations.filter((a) => a.type === 'suggestion' || a.type === 'highlight'),
+    [annotations],
+  )
+  const sidebarAnnotationNumberMap = useMemo(
+    () =>
+      Object.fromEntries(sidebarFloatingAnnotations.map((annotation, index) => [annotation.id, index + 1])),
+    [sidebarFloatingAnnotations],
+  )
+  /** 亮点赏析已逐条回贴正文；侧栏不再展示整段长文本块 */
+  const bulkSidebarComments = useMemo<ReviewComment[]>(() => {
+    return []
+  }, [])
+  const bulkSidebarCount = bulkSidebarComments.length
   const summaryComment = useMemo(() => {
     const raw = detail?.comments?.find((comment) => comment.commentType === 1)?.content || ''
     return extractOverallSummaryLead(raw)
@@ -341,7 +603,7 @@ export function ReviewAnnotationPage() {
   useEffect(() => {
     const rebuildFloatingGroups = () => {
       const paper = paperRef.current
-      if (!paper || !annotations.length) {
+      if (!paper || !sidebarFloatingAnnotations.length) {
         setFloatingGroups([])
         setFloatingTopMap({})
         setFloatingMinHeight(0)
@@ -349,7 +611,7 @@ export function ReviewAnnotationPage() {
       }
 
       const paperRect = paper.getBoundingClientRect()
-      const measured = annotations
+      const measured = sidebarFloatingAnnotations
         .map((annotation) => {
           const target = inlineRefs.current[annotation.id]
           if (!target) return null
@@ -388,7 +650,7 @@ export function ReviewAnnotationPage() {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', rebuildFloatingGroups)
     }
-  }, [annotations, content])
+  }, [sidebarFloatingAnnotations, content])
 
   useEffect(() => {
     if (!floatingGroups.length) {
@@ -436,32 +698,21 @@ export function ReviewAnnotationPage() {
   }
 
   return (
-    <div className="page-grid annotation-reading-shell">
-      <section className="annotation-reading-header">
-        <div className="section-heading annotation-reading-heading">
-          <div>
-            <p className="eyebrow">作文批注稿</p>
-            <h3>{detail.essayTitle || essay.title || '未命名作文'}</h3>
-            <p className="annotation-reading-meta">
-              {formatDateTime(detail.startTime)} · 总分 {detail.totalScore != null ? detail.totalScore.toFixed(1) : '-'} · 批注 {annotations.length} 条
-            </p>
-          </div>
-          <div className="action-row annotation-reading-actions">
-            <button type="button" className="secondary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/summary`)}>
-              查看总览
-            </button>
-            {canManualReview ? (
-              <button type="button" className="secondary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/manual`)}>
-                教师手动批改
-              </button>
-            ) : null}
-            <button type="button" className="primary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/rerun`)}>
-              继续批改
-            </button>
-          </div>
-        </div>
-      </section>
-
+    <>
+      <div className="annotation-reading-toolbar action-row">
+        <button type="button" className="primary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/rerun`)}>
+          继续批改
+        </button>
+        <button type="button" className="secondary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/summary`)}>
+          查看总览
+        </button>
+        {canManualReview ? (
+          <button type="button" className="secondary-button" onClick={() => navigate(`/reviews/${detail.reviewId}/manual`)}>
+            教师手动批改
+          </button>
+        ) : null}
+      </div>
+      <div className="page-grid annotation-reading-shell">
       <section className="annotation-layout">
         <article className="panel annotation-report-panel">
           <div className="annotation-report-grid">
@@ -501,6 +752,9 @@ export function ReviewAnnotationPage() {
                         key={`paragraph-${paragraphIndex}`}
                         className={`annotation-paragraph ${paragraph.isTitle ? 'annotation-paragraph-title' : ''}`}
                         aria-label={paragraph.isTitle ? '作文标题' : `第 ${paragraphIndex + 1} 段`}
+                        ref={(node) => {
+                          paragraphRefs.current[paragraphIndex] = node
+                        }}
                       >
                         {paragraph.text.trim() ? (
                           paragraph.rows.map((row, rowIndex) => (
@@ -531,6 +785,52 @@ export function ReviewAnnotationPage() {
                                 const annotationNumber = annotationNumberMap[annotation.id]
                                 const showBadge = cell.index === annotation.start
                                 const isWave = annotation.type === 'suggestion'
+                                const isCorrection = annotation.type === 'correction'
+
+                                if (isCorrection) {
+                                  const aboveChars = correctionAboveChars(annotation, cell.index)
+                                  return (
+                                    <div
+                                      key={`${annotation.id}-${paragraphIndex}-${rowIndex}-${cellIndex}`}
+                                      className={`annotation-cell annotation-inline annotation-inline-correction ${
+                                        activeId === annotation.id ? 'annotation-inline-active' : ''
+                                      }`}
+                                      ref={(node) => {
+                                        if (!inlineRefs.current[annotation.id]) {
+                                          inlineRefs.current[annotation.id] = node
+                                        }
+                                      }}
+                                    >
+                                      {aboveChars.length ? (
+                                        <div
+                                          className={`annotation-correction-above-track ${
+                                            aboveChars.length === 1 ? 'annotation-correction-above-track-single' : ''
+                                          }`}
+                                        >
+                                          {aboveChars.map((ch, idx) => (
+                                            <span
+                                              key={`${annotation.id}-fix-${cell.index}-${idx}`}
+                                              className="annotation-correction-above"
+                                              data-correction-char="true"
+                                            >
+                                              {ch}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        className="annotation-char-trigger annotation-char-trigger-correction"
+                                        onClick={(event) => {
+                                          event.stopPropagation()
+                                          focusAnnotation(annotation.id)
+                                        }}
+                                      >
+                                        <span className="annotation-char-text annotation-char-wrong">{cell.char}</span>
+                                      </button>
+                                    </div>
+                                  )
+                                }
 
                                 return (
                                   <span
@@ -544,8 +844,8 @@ export function ReviewAnnotationPage() {
                                       }
                                     }}
                                   >
-                                    {showBadge ? (
-                                      <span className={`annotation-inline-badge ${isWave ? 'annotation-inline-badge-wave' : 'annotation-inline-badge-line'}`}>
+                                    {showBadge && isWave ? (
+                                      <span className="annotation-inline-badge annotation-inline-badge-wave">
                                         {annotationNumber}
                                       </span>
                                     ) : null}
@@ -603,10 +903,22 @@ export function ReviewAnnotationPage() {
 
             <aside className="annotation-report-notes">
               <p className="eyebrow">批注列表</p>
-              <h3>{annotations.length ? '右侧浮动批注' : '暂无批注'}</h3>
-              <div className="annotation-floating-layer" style={{ minHeight: `${floatingMinHeight || 240}px` }}>
-                {floatingGroups.length ? (
-                  floatingGroups.map((group) => (
+              {paragraphSuggestions.length || floatingGroups.length ? (
+                <div className="annotation-floating-layer" style={{ minHeight: `${floatingMinHeight || 240}px` }}>
+                  {paragraphSuggestions.map((s, idx) => (
+                    <div
+                      key={s.id}
+                      className="annotation-paragraph-pin annotation-floating-comment annotation-floating-comment-suggestion"
+                      style={{ top: `${paragraphSuggestionTopMap[s.id] ?? 0}px` }}
+                      ref={(node) => {
+                        paragraphSuggestionRefs.current[s.id] = node
+                      }}
+                    >
+                      <span className="annotation-note-index annotation-note-index-suggestion">{idx + 1}</span>
+                      <span className="annotation-paragraph-pin-text">{s.content}</span>
+                    </div>
+                  ))}
+                  {floatingGroups.map((group) => (
                     <div
                       key={group.id}
                       ref={(node) => {
@@ -626,20 +938,44 @@ export function ReviewAnnotationPage() {
                         >
                           <span
                             className={`annotation-note-index ${
-                              annotation.type === 'suggestion' ? 'annotation-note-index-wave' : 'annotation-note-index-line'
+                              annotation.type === 'suggestion'
+                                ? 'annotation-note-index-suggestion'
+                                : 'annotation-note-index-highlight'
                             }`}
                           >
-                            {annotationNumberMap[annotation.id]}
+                            {sidebarAnnotationNumberMap[annotation.id] ?? 0}
                           </span>
                           <span>{annotation.content}</span>
                         </button>
                       ))}
                     </div>
-                  ))
-                ) : (
-                  <div className="empty-state annotation-empty">当前作文暂无可定位批注</div>
-                )}
-              </div>
+                  ))}
+                </div>
+              ) : null}
+              {bulkSidebarCount ? (
+                <div className="annotation-sidebar-bulk">
+                  {bulkSidebarComments.map((c, i) => (
+                    <div
+                      key={c.commentId != null ? `bulk-${c.commentId}` : `bulk-${c.commentType}-${i}`}
+                      className={`annotation-floating-comment annotation-floating-comment-${
+                        c.commentType === 2 ? 'suggestion' : 'highlight'
+                      } annotation-sidebar-bulk-item`}
+                    >
+                      <span
+                        className={`annotation-note-index ${
+                          c.commentType === 2 ? 'annotation-note-index-suggestion' : 'annotation-note-index-highlight'
+                        }`}
+                      >
+                        {i + 1 + sidebarFloatingAnnotations.length}
+                      </span>
+                      <span className="annotation-sidebar-bulk-text">{c.content}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {!bulkSidebarCount && !floatingGroups.length && !paragraphSuggestions.length ? (
+                <div className="empty-state annotation-empty">暂无亮点赏析与改进建议</div>
+              ) : null}
             </aside>
           </div>
         </article>
@@ -647,5 +983,6 @@ export function ReviewAnnotationPage() {
 
       {error ? <div className="feedback error">{error}</div> : null}
     </div>
+    </>
   )
 }

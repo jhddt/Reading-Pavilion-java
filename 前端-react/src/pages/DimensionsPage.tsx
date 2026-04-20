@@ -10,7 +10,6 @@ export function DimensionsPage() {
   const navigate = useNavigate()
   const [rules, setRules] = useState<ReviewRule[]>([])
   const [error, setError] = useState('')
-  const canManageDimension = hasAnyRole(user?.role, ['ADMIN'])
   const canManageRule = hasAnyRole(user?.role, ['STUDENT', 'TEACHER', 'ADMIN'])
 
   const loadData = async () => {

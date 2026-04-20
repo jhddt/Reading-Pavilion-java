@@ -1462,6 +1462,152 @@ textarea:focus {
   background: #eff4ff;
 }
 
+/* ========== 表格样式 ========== */
+
+.table-container {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 20px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table thead {
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.data-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.data-table tbody tr {
+  border-bottom: 1px solid #f3f4f6;
+  transition: background-color 0.15s ease;
+}
+
+.data-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background: #f9fafb;
+}
+
+.data-table td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.essay-title-cell {
+  max-width: 300px;
+}
+
+.essay-title-cell strong {
+  color: #1f2937;
+  font-weight: 500;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.status-badge.status-0 {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-badge.status-1 {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.status-badge.status-2 {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-badge.status-3 {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.actions-cell {
+  white-space: nowrap;
+}
+
+.table-btn {
+  padding: 6px 12px;
+  margin-right: 6px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.table-btn:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
+.table-btn.danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.table-btn.danger:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+/* 响应式设计 */
+@media (max-width: 1024px) {
+  .data-table {
+    font-size: 13px;
+  }
+  
+  .data-table th,
+  .data-table td {
+    padding: 10px 12px;
+  }
+  
+  .table-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .table-container {
+    overflow-x: auto;
+  }
+  
+  .data-table {
+    min-width: 800px;
+  }
+}
+
 .dashboard-hero {
   padding: 18px 20px;
 }
@@ -1498,6 +1644,7 @@ textarea:focus {
   color: var(--text);
   font-size: 14px;
 }
+
 
 .dashboard-bar-track {
   width: 100%;
@@ -2752,27 +2899,26 @@ textarea:focus {
   gap: 6px;
 }
 
-.annotation-reading-header {
-  display: grid;
-  gap: 8px;
-  justify-content: center;
-}
-
-.annotation-reading-heading {
-  max-width: 1220px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0 4px;
-}
-
 .annotation-reading-meta {
   margin: 8px 0 0;
   color: #5f77a8;
   line-height: 1.75;
 }
 
-.annotation-reading-actions {
+.annotation-reading-toolbar {
+  max-width: 1220px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 4px;
+  justify-content: flex-start;
   align-items: center;
+}
+
+.annotation-reading-toolbar .primary-button,
+.annotation-reading-toolbar .secondary-button {
+  padding: 6px 14px;
+  font-size: 13px;
+  line-height: 1.3;
 }
 
 .annotation-report-panel {
@@ -2793,7 +2939,7 @@ textarea:focus {
 
 .annotation-report-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.28fr) 320px;
+  grid-template-columns: 530px 320px;
   gap: 18px;
   align-items: start;
 }
@@ -2809,6 +2955,8 @@ textarea:focus {
   gap: 18px;
   padding-right: 6px;
   padding-top: 0;
+  width: 600px;
+  max-width: 100%;
 }
 
 .annotation-report-notes {
@@ -2849,7 +2997,10 @@ textarea:focus {
   border: 1px solid rgba(0, 47, 167, 0.1);
   background: linear-gradient(180deg, #f9fbff, #ffffff);
   box-sizing: border-box;
-  width: 100%;
+  width: calc(var(--essay-cell-size) * 20);
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .annotation-summary-title {
@@ -2866,9 +3017,46 @@ textarea:focus {
   font-size: var(--summary-font-size);
 }
 
+.annotation-sidebar-bulk {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.annotation-sidebar-bulk-item {
+  align-items: flex-start;
+}
+
+.annotation-sidebar-bulk-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .annotation-floating-layer {
   position: relative;
   margin-top: 12px;
+}
+
+.annotation-paragraph-pin {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-size: var(--comment-font-size);
+  line-height: 1.8;
+  color: #1f63e0;
+}
+
+.annotation-paragraph-pin-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .annotation-comment-group {
@@ -2905,6 +3093,10 @@ textarea:focus {
   color: #1f63e0;
 }
 
+.annotation-floating-comment-highlight {
+  color: #0f6b45;
+}
+
 .annotation-floating-comment-revision,
 .annotation-floating-comment-correction {
   color: #e24d34;
@@ -2924,6 +3116,10 @@ textarea:focus {
 
 .annotation-note-index-suggestion {
   background: #2f6df3;
+}
+
+.annotation-note-index-highlight {
+  background: #1e9e62;
 }
 
 .annotation-note-index-revision {
@@ -2951,9 +3147,10 @@ textarea:focus {
   color: #5370a8;
 }
 
-.annotation-report-paper h3,
-.annotation-report-notes h3 {
-  font-family: "ZhangHardCopyKaiTi", "FZKai-Z03S", "方正楷体简体", "KaiTi", "楷体", "STKaiti", serif;
+.annotation-report-notes .eyebrow {
+  text-align: center;
+  font-size: 14px;
+  margin-bottom: 10px;
 }
 
 .annotation-meta-row {
@@ -3009,13 +3206,14 @@ textarea:focus {
   background-size: 100% 100%;
   background-position: 0 0;
   box-shadow: none;
-  /* 正文行距：横线/波连线画在行间留白内 */
-  --annotation-row-gap: 10px;
+  /* 正文行距：略大于半格，便于错字上方写正字；横线/波连线画在行间留白内 */
+  --annotation-row-gap: calc(var(--essay-cell-size) * 0.58);
 }
 
 .annotation-row-paper-title {
   width: 100%;
   margin: 0;
+  margin-bottom: var(--annotation-row-gap);
 }
 
 .annotation-cell-paper-title {
@@ -3035,15 +3233,20 @@ textarea:focus {
 
 .annotation-paper-report .annotation-paragraph .annotation-row {
   margin-bottom: var(--annotation-row-gap);
+  overflow: visible;
 }
 
 .annotation-paper-report .annotation-paragraph:last-child .annotation-row:last-child {
   margin-bottom: 0;
 }
 
-.annotation-paper-report .annotation-paragraph .annotation-wave,
-.annotation-paper-report .annotation-paragraph .annotation-line {
+.annotation-paper-report .annotation-paragraph .annotation-wave {
   bottom: calc(-1 * var(--annotation-row-gap) + 4px);
+}
+
+/* 批注阅读稿：不显示修改意见类红色横线（正文下红线） */
+.annotation-paper-report .annotation-paragraph .annotation-line {
+  display: none;
 }
 
 .annotation-paragraph-empty {
@@ -3098,6 +3301,51 @@ textarea:focus {
   position: relative;
 }
 
+/* 正字写在上一行与当前行之间的留白（与 .annotation-row 的 margin-bottom 同高） */
+.annotation-correction-above-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(-1 * var(--annotation-row-gap));
+  height: var(--annotation-row-gap);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 1px;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.annotation-correction-above-track-single {
+  justify-content: center;
+}
+
+.annotation-correction-above {
+  font-size: min(
+    calc(var(--essay-cell-size) * 0.52),
+    calc(var(--annotation-row-gap) * 0.98)
+  );
+  font-weight: 700;
+  color: #c62828;
+  line-height: 1;
+  padding: 0 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.72em;
+  pointer-events: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.annotation-char-wrong {
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 500;
+}
+
 .annotation-char-trigger {
   position: relative;
   width: 100%;
@@ -3111,6 +3359,17 @@ textarea:focus {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+/* 须写在 .annotation-char-trigger 之后，否则 transparent 会盖住错字格红底 */
+.annotation-char-trigger.annotation-char-trigger-correction {
+  background: rgba(229, 57, 53, 0.32);
+  border-radius: 2px;
+}
+
+.annotation-inline-correction.annotation-inline-active .annotation-char-trigger.annotation-char-trigger-correction {
+  background: rgba(229, 57, 53, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(183, 28, 28, 0.45);
 }
 
 .annotation-char-text {
@@ -3150,6 +3409,16 @@ textarea:focus {
 .annotation-inline-active .annotation-char-trigger {
   background: rgba(0, 47, 167, 0.08);
   box-shadow: inset 0 0 0 1px rgba(0, 47, 167, 0.18);
+}
+
+.annotation-inline-highlight .annotation-char-trigger {
+  background: rgba(30, 158, 98, 0.24);
+  border-radius: 2px;
+}
+
+.annotation-inline-highlight.annotation-inline-active .annotation-char-trigger {
+  background: rgba(30, 158, 98, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(18, 116, 72, 0.38);
 }
 
 .annotation-card-head {
@@ -3381,10 +3650,9 @@ textarea:focus {
   .annotation-paper-report {
     --essay-cell-size: 24px;
     font-size: 18px;
-    --annotation-row-gap: 8px;
   }
 
-  .annotation-reading-heading {
+  .annotation-reading-toolbar {
     padding: 0;
   }
 }

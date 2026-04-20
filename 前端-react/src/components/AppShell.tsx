@@ -135,7 +135,6 @@ export function AppShell() {
               </span>
               <span>
                 <strong>{item.label}</strong>
-                <small>{item.description}</small>
               </span>
             </NavLink>
           ))}

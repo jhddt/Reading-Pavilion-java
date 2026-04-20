@@ -69,35 +69,49 @@ export function EssaysPage() {
         </div>
       </section>
 
-      <section className="stack-list">
-        {essays.map((essay) => (
-          <article key={essay.id} className="list-row essay-list-row">
-            <div>
-              <strong>{essay.title || '未命名作文'}</strong>
-              <p>
-                {submitTypeText(essay.submitType)} · {essay.wordCount || 0} 字 · {formatDateTime(essay.createTime)}
-              </p>
-            </div>
-            <div className="list-row-actions">
-              <span className="pill">{essayStatusText(essay.status)}</span>
-              <button type="button" className="secondary-button" onClick={() => navigate(`/essays/${essay.id}`)}>
-                查看详情
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => navigate(`/reviews?essayId=${essay.id}`)}
-              >
-                批改记录
-              </button>
-              {essay.status === 0 ? (
-                <button type="button" className="danger-button" onClick={() => onDelete(essay)}>
-                  删除草稿
-                </button>
-              ) : null}
-            </div>
-          </article>
-        ))}
+      <section className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>标题</th>
+              <th>提交方式</th>
+              <th>字数</th>
+              <th>创建时间</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {essays.map((essay) => (
+              <tr key={essay.id}>
+                <td className="essay-title-cell">
+                  <strong>{essay.title || '未命名作文'}</strong>
+                </td>
+                <td>{submitTypeText(essay.submitType)}</td>
+                <td>{essay.wordCount || 0} 字</td>
+                <td>{formatDateTime(essay.createTime)}</td>
+                <td>
+                  <span className={`status-badge status-${essay.status}`}>
+                    {essayStatusText(essay.status)}
+                  </span>
+                </td>
+                <td className="actions-cell">
+                  <button type="button" className="table-btn" onClick={() => navigate(`/essays/${essay.id}`)}>
+                    查看
+                  </button>
+                  <button type="button" className="table-btn" onClick={() => navigate(`/reviews?essayId=${essay.id}`)}>
+                    批改记录
+                  </button>
+                  {essay.status === 0 ? (
+                    <button type="button" className="table-btn danger" onClick={() => onDelete(essay)}>
+                      删除
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         {!essays.length ? <div className="empty-state">暂无作文数据</div> : null}
       </section>
 
