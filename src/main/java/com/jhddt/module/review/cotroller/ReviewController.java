@@ -235,7 +235,7 @@ public class ReviewController {
 
     @Operation(summary = "新增批改细则", description = "新增一条批改细则配置（ruleName 必填）")
     @PostMapping(value = "/rules", consumes = "application/json", produces = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
     public Result<ReviewRuleEntity> createRule(
             @RequestBody ReviewRuleEntity rule,
             Authentication authentication) {
@@ -251,7 +251,7 @@ public class ReviewController {
 
     @Operation(summary = "更新批改细则", description = "更新批改细则配置（支持部分字段更新）")
     @PutMapping(value = "/rules/{id}", consumes = "application/json", produces = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
     public Result<Void> updateRule(
             @Parameter(description = "细则ID", required = true, example = "1")
             @PathVariable Long id,
@@ -270,7 +270,7 @@ public class ReviewController {
 
     @Operation(summary = "启用/禁用批改细则", description = "通过 enabled=true/false 控制 status=1/0")
     @PatchMapping(value = "/rules/{id}/status", produces = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
     public Result<Void> updateRuleStatus(
             @Parameter(description = "细则ID", required = true, example = "1")
             @PathVariable Long id,
@@ -288,7 +288,7 @@ public class ReviewController {
 
     @Operation(summary = "删除批改细则", description = "逻辑删除批改细则（is_deleted=1）")
     @DeleteMapping("/rules/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('STUDENT','TEACHER','ADMIN')")
     public Result<Void> deleteRule(
             @Parameter(description = "细则ID", required = true, example = "1")
             @PathVariable Long id,

@@ -54,6 +54,10 @@ public class ReviewRuleEntity {
     @TableField("deduction_detail")
     private String deductionDetail;
 
+    @Schema(description = "写作手法要求（JSON格式）")
+    @TableField("writing_techniques")
+    private String writingTechniques;
+
     @Schema(description = "状态：1-启用，0-禁用", example = "1")
     @TableField("status")
     private Integer status;

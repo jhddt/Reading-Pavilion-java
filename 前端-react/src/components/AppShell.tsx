@@ -9,7 +9,7 @@ const navigationItems = [
   { to: '/dashboard', label: '概览', icon: '📊', description: '系统概览与快捷入口' },
   { to: '/essays', label: '作文', icon: '📝', description: '作文列表与新建内容' },
   { to: '/reviews', label: '批改', icon: '✅', description: '批改记录与结果查看' },
-  { to: '/dimensions', label: '细则', icon: '📐', description: '批改细则与规则管理', adminOnly: true },
+  { to: '/dimensions', label: '细则', icon: '📐', description: '批改细则与规则管理', minRole: 'STUDENT' },
   { to: '/dimension-library', label: '维度', icon: '📏', description: '公共评分维度库管理', adminOnly: true },
   { to: '/audit-logs', label: '日志', icon: '🧾', description: '管理员操作审计日志', adminOnly: true },
   { to: '/users/import', label: '用户', icon: '👥', description: '管理员管理全部用户与导入', adminOnly: true },
@@ -22,8 +22,9 @@ export function AppShell() {
   const visibleNavigationItems = useMemo(
     () =>
       navigationItems.filter((item) => {
-        if (!('adminOnly' in item) || !item.adminOnly) return true
-        return hasAnyRole(user?.role, ['ADMIN'])
+        if ('adminOnly' in item && item.adminOnly) return hasAnyRole(user?.role, ['ADMIN'])
+        if ('minRole' in item && item.minRole) return hasAnyRole(user?.role, ['STUDENT', 'TEACHER', 'ADMIN'])
+        return true
       }),
     [user?.role],
   )
@@ -140,11 +141,13 @@ export function AppShell() {
           ))}
         </nav>
 
-        <button type="button" className="user-panel plain-button" onClick={() => setProfileOpen(true)}>
-          <div className="user-avatar">{(user?.userName || '用').slice(0, 1).toUpperCase()}</div>
-          <div>
-            <strong>{user?.userName || '当前用户'}</strong>
-            <p>{roleText(user?.role)}</p>
+        <button type="button" className="user-panel plain-button" onClick={() => setProfileOpen(true)} title={user?.userName || '当前用户'}>
+          <div className="user-avatar">
+            {user?.avatarPreviewUrl ? (
+              <img src={user.avatarPreviewUrl} alt={user.userName || '用户头像'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+            ) : (
+              (user?.userName || '用').slice(0, 1).toUpperCase()
+            )}
           </div>
         </button>
       </aside>

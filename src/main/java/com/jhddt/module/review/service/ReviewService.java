@@ -32,6 +32,7 @@ import com.jhddt.common.util.JwtUtil;
 import com.jhddt.config.security.JwtProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -701,6 +702,18 @@ public class ReviewService {
         if (deleted) {
             evictReviewDetailCache(reviewId);
             evictReviewStatusCache(reviewId);
+            
+            // 释放批改锁，允许重新批改
+            if (record.getEssayId() != null) {
+                releaseReviewLock(record.getEssayId());
+                
+                // 检查该作文是否还有其他批改记录
+                List<ReviewRecordEntity> remainingReviews = reviewMapper.selectReviewRecordsByEssayId(record.getEssayId());
+                if (remainingReviews == null || remainingReviews.isEmpty()) {
+                    // 如果没有其他批改记录了，将作文状态改回"已提交"
+                    updateEssayStatus(record.getEssayId(), EssayStatus.SUBMITTED);
+                }
+            }
         }
         return deleted;
     }
@@ -1927,11 +1940,13 @@ public class ReviewService {
     private void appendPromptSystemRules(StringBuilder prompt) {
         prompt.append("你是一位经验丰富、评价标准稳定的语文老师，请只执行“内容批改”任务。\n");
         prompt.append("请遵守以下公共规则：\n");
-        prompt.append("1. 批改时保持专业、客观、鼓励性的语气，既指出问题，也肯定优点。\n");
+        prompt.append("1. 批改时保持专业、客观、鼓励性的语气，既要指出问题，更要肯定优点，给予学生正向激励。\n");
         prompt.append("2. 重点评价立意、选材、结构、语言表达和完成度，不要把错别字纠正当作本次任务主体。\n");
         prompt.append("3. 所有评分必须严格围绕给定评分细则和评分项展开，不要自行改动评分项名称。\n");
-        prompt.append("4. 每个评分项都要给出简短评价，并明确写出该项得分。\n");
-        prompt.append("5. 总评、建议和修改意见都必须结合作文原文，避免空泛套话。\n\n");
+        prompt.append("4. 每个评分项都要给出简短评价，先肯定优点，再指出不足，并明确写出该项得分。\n");
+        prompt.append("5. 必须从作文中摘取写得好的句子或段落进行点评，让学生知道哪些地方做得好。\n");
+        prompt.append("6. 总评、建议和修改意见都必须结合作文原文，避免空泛套话。\n");
+        prompt.append("7. 批改要体现“赏识教育”理念，多发现闪光点，多给予鼓励，帮助学生建立写作信心。\n\n");
     }
 
     private void appendPromptRuleLayer(StringBuilder prompt, ReviewRuleEntity selectedRule) {
@@ -1963,6 +1978,55 @@ public class ReviewService {
         if (selectedRule.getPromptTemplate() != null && !selectedRule.getPromptTemplate().isBlank()) {
             prompt.append("细则专属批改提示：").append(selectedRule.getPromptTemplate()).append("\n");
         }
+        
+        // 新增：写作手法要求（从JSON字段解析）
+        if (selectedRule.getWritingTechniques() != null && !selectedRule.getWritingTechniques().isBlank()) {
+            prompt.append("\n【写作手法要求】\n");
+            try {
+                // 解析JSON字段
+                JsonNode techniques = objectMapper.readTree(selectedRule.getWritingTechniques());
+                
+                // 提取必须手法
+                JsonNode required = techniques.get("required_techniques");
+                if (required != null && required.isArray() && required.size() > 0) {
+                    prompt.append("必须掌握的写作手法：\n");
+                    for (JsonNode tech : required) {
+                        String name = tech.get("name").asText();
+                        String desc = tech.get("description").asText();
+                        int minCount = tech.get("min_count").asInt();
+                        prompt.append(String.format("  - %s：%s（至少使用%d次）\n", name, desc, minCount));
+                    }
+                }
+                
+                // 提取推荐手法
+                JsonNode recommended = techniques.get("recommended_techniques");
+                if (recommended != null && recommended.isArray() && recommended.size() > 0) {
+                    prompt.append("推荐使用的写作手法（加分项）：");
+                    for (int i = 0; i < recommended.size(); i++) {
+                        if (i > 0) prompt.append("、");
+                        prompt.append(recommended.get(i).asText());
+                    }
+                    prompt.append("\n");
+                }
+                
+                // 提取最少手法总数
+                JsonNode minTotal = techniques.get("min_total_count");
+                if (minTotal != null) {
+                    prompt.append(String.format("要求至少使用%d种不同的写作手法。\n", minTotal.asInt()));
+                }
+                
+                // 提取评价重点
+                JsonNode focus = techniques.get("evaluation_focus");
+                if (focus != null) {
+                    prompt.append("评价重点：").append(focus.asText()).append("\n");
+                }
+                
+            } catch (Exception e) {
+                // JSON解析失败，忽略写作手法要求
+                log.warn("解析写作手法JSON失败：{}", e.getMessage());
+            }
+        }
+        
         prompt.append("\n");
     }
 
@@ -2011,17 +2075,20 @@ public class ReviewService {
         prompt.append("}\n");
         prompt.append("```\n");
         prompt.append("【评语输出】\n");
-        prompt.append("【总评】（对整篇作文的综合评价）\n");
-        prompt.append("【改进建议】（给出3-8条可执行建议，分点列出）\n");
+        prompt.append("【总评】（对整篇作文的综合评价，先肯定优点，再指出不足，最后给予鼓励）\n");
+        prompt.append("【亮点赏析】（从作文中摘取3-6处写得好的句子或段落，逐条点评为什么好，格式：“原句” - 点评说明）\n");
+        prompt.append("【改进建议】（给出3-8条可执行建议，分点列出，语气要温和鼓励）\n");
         prompt.append("【修改意见】（给出3-8条“原句 -> 修改后”式的具体修改，尽量从作文原文中摘句；如果原文无法摘取，也要给出可直接替换的修改示例）\n");
         prompt.append("【总分】XX（满分100）\n\n");
         prompt.append("注意：\n");
         prompt.append("1. 评分JSON 必须是合法 JSON，items 中的 dimensionName 必须与给定评分项名称完全一致。\n");
         prompt.append("2. totalScore 必须等于各评分项 score 之和。\n");
         prompt.append("3. 【评语输出】部分必须继续使用固定标签，方便系统解析。\n");
-        prompt.append("4. 不要遗漏任何一个输出板块。\n");
-        prompt.append("5. 不要只输出符号、空话或句号，内容必须完整可读。\n");
-        prompt.append("6. 不要输出与本次内容批改无关的解释性前言。\n");
+        prompt.append("4. 【亮点赏析】是必须输出的板块，不能省略，必须从原文中摘取具体句子。\n");
+        prompt.append("5. 不要遗漏任何一个输出板块。\n");
+        prompt.append("6. 不要只输出符号、空话或句号，内容必须完整可读。\n");
+        prompt.append("7. 不要输出与本次内容批改无关的解释性前言。\n");
+        prompt.append("8. 批改要体现正向激励，多发现优点，多给予鼓励。\n");
     }
 
     private List<ReviewCommentEntity> parseComments(String reviewContent) {
@@ -2029,7 +2096,7 @@ public class ReviewService {
         final String full = reviewContent.trim();
         List<ReviewCommentEntity> comments = new ArrayList<>();
 
-        String summary = extractBetweenMarkers(full, "【总评】", List.of("【改进建议】", "【修改意见】", "【总分】"));
+        String summary = extractBetweenMarkers(full, "【总评】", List.of("【亮点赏析】", "【改进建议】", "【修改意见】", "【总分】"));
         if (summary != null && summary.trim().length() >= MIN_CONTENT_LENGTH) {
             comments.add(ReviewCommentEntity.builder()
                     .commentType(1)
@@ -2040,6 +2107,15 @@ public class ReviewService {
             comments.add(ReviewCommentEntity.builder()
                     .commentType(1)
                     .content(full)
+                    .build());
+        }
+
+        // 解析亮点赏析（新增）
+        String highlights = extractBetweenMarkers(full, "【亮点赏析】", List.of("【改进建议】", "【修改意见】", "【总分】"));
+        if (highlights != null && highlights.trim().length() >= MIN_CONTENT_LENGTH) {
+            comments.add(ReviewCommentEntity.builder()
+                    .commentType(4)  // 4=亮点赏析
+                    .content(highlights.trim())
                     .build());
         }
 

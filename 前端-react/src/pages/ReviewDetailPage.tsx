@@ -4,17 +4,19 @@ import { useAuth } from '../auth/AuthProvider'
 import { hasAnyRole } from '../auth/roles'
 import { api } from '../lib/api'
 import { formatDateTime, formatShortDateTime, reviewStatusText } from '../lib/format'
+import { extractOverallSummaryLead } from '../lib/reviewSummaryText'
 import type { ReviewDetail, ReviewRecord } from '../types'
 
 function formatCommentContent(commentType: number | undefined, content: string) {
   if (!content) return ''
-  const cleaned = commentType === 1 ? content.replace(/^【总评】\s*/u, '') : content
+  const cleaned = commentType === 1 ? extractOverallSummaryLead(content) : content
   return cleaned.replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function commentTitle(commentType: number | undefined) {
   if (commentType === 2) return '改进建议'
   if (commentType === 3) return '修改意见'
+  if (commentType === 4) return '亮点赏析'
   if (commentType === 1) return ''
   return '其他评语'
 }
@@ -115,10 +117,12 @@ export function ReviewDetailPage() {
   }
 
   const summaryComment = detail.comments?.find((comment) => comment.commentType === 1)
+  const highlightsComment = detail.comments?.find((comment) => comment.commentType === 4)
   const suggestionComment = detail.comments?.find((comment) => comment.commentType === 2)
   const revisionComment = detail.comments?.find((comment) => comment.commentType === 3)
-  const otherComments = detail.comments?.filter((comment) => ![1, 2, 3].includes(comment.commentType ?? -1)) || []
+  const otherComments = detail.comments?.filter((comment) => ![1, 2, 3, 4].includes(comment.commentType ?? -1)) || []
   const totalScoreText = detail.totalScore != null ? detail.totalScore.toFixed(1) : '-'
+  const highlightItems = highlightsComment ? splitCommentItems(highlightsComment.content) : []
   const suggestionItems = suggestionComment ? splitCommentItems(suggestionComment.content) : []
   const revisionRows = revisionComment ? parseRevisionRows(revisionComment.content) : []
 
@@ -209,6 +213,30 @@ export function ReviewDetailPage() {
           ) : (
             <div className="empty-state">暂无总评内容</div>
           )}
+
+          {highlightsComment ? (
+            <div className="review-summary-block review-highlights-block">
+              <div className="review-summary-block-title" style={{ color: '#10b981' }}>✨ {commentTitle(highlightsComment.commentType)}</div>
+              <div className="review-table-wrap">
+                <table className="review-content-table review-highlights-table">
+                  <thead>
+                    <tr>
+                      <th className="review-table-index">序号</th>
+                      <th>优秀之处</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {highlightItems.map((item, index) => (
+                      <tr key={`highlight-${index}`} style={{ backgroundColor: '#f0fdf4' }}>
+                        <td>{index + 1}</td>
+                        <td style={{ color: '#065f46' }}>{item}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           <div className="review-comment-stack">
             {suggestionComment ? (

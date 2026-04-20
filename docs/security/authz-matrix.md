@@ -24,10 +24,10 @@
 | 接口                                                       | 角色要求    | Owner Check | 说明         |
 | -------------------------------------------------------- | ------- | ----------- | ---------- |
 | `/review/essay/**`、`/review/record/**`、`/review/records` | 已登录     | 是（作文归属）     | 用户可操作自己的评审 |
-| `POST /review/rules`                                     | `ADMIN` | 否           | 新增规则       |
-| `PUT /review/rules/{id}`                                 | `ADMIN` | 否           | 修改规则       |
-| `PATCH /review/rules/{id}/status`                        | `ADMIN` | 否           | 启停规则       |
-| `DELETE /review/rules/{id}`                              | `ADMIN` | 否           | 删除规则       |
+| `POST /review/rules`                                     | 已登录     | 否           | 新增规则       |
+| `PUT /review/rules/{id}`                                 | 已登录     | 否           | 修改规则       |
+| `PATCH /review/rules/{id}/status`                        | 已登录     | 否           | 启停规则       |
+| `DELETE /review/rules/{id}`                              | 已登录     | 否           | 删除规则       |
 | `GET /review/rules`                                      | 已登录     | 否           | 查询规则（只读）   |
 | `POST /review/dimensions`                                | `ADMIN` | 否           | 新增维度       |
 | `PUT /review/dimensions/{id}`                            | `ADMIN` | 否           | 修改维度       |

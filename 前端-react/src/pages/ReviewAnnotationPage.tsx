@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { hasAnyRole } from '../auth/roles'
 import { api } from '../lib/api'
 import { formatDateTime } from '../lib/format'
+import { extractOverallSummaryLead } from '../lib/reviewSummaryText'
 import type { Essay, ReviewComment, ReviewDetail, TextCorrection } from '../types'
 
 type Annotation =
@@ -28,9 +29,77 @@ type Annotation =
     }
 
 const CHARS_PER_LINE = 20
+/** 正文段首行缩进格数（不占原文 offset，批注仍按原文索引匹配） */
+const FIRST_LINE_INDENT_CELLS = 2
+const BODY_FIRST_ROW_CHARS = CHARS_PER_LINE - FIRST_LINE_INDENT_CELLS
+
+type AnnotationGridCell = {
+  char: string
+  index: number
+  annotation: Annotation | null
+  /** 版式缩进格，无对应原文 index */
+  indent?: boolean
+}
+
+function buildParagraphRows(
+  chars: Array<{ char: string; index: number; annotation: Annotation | null }>,
+  isTitle: boolean,
+): Array<Array<AnnotationGridCell>> {
+  if (!chars.length) return []
+
+  if (isTitle) {
+    const rows: Array<Array<AnnotationGridCell>> = []
+    for (let i = 0; i < chars.length; i += CHARS_PER_LINE) {
+      rows.push(chars.slice(i, i + CHARS_PER_LINE).map((c) => ({ ...c })))
+    }
+    return rows
+  }
+
+  const rows: Array<Array<AnnotationGridCell>> = []
+  const indentPrefix: AnnotationGridCell[] = Array.from({ length: FIRST_LINE_INDENT_CELLS }, () => ({
+    char: '',
+    index: -1,
+    annotation: null,
+    indent: true,
+  }))
+
+  const firstChunk = chars.slice(0, BODY_FIRST_ROW_CHARS)
+  rows.push([...indentPrefix, ...firstChunk.map((c) => ({ ...c }))])
+
+  for (let offset = BODY_FIRST_ROW_CHARS; offset < chars.length; offset += CHARS_PER_LINE) {
+    rows.push(chars.slice(offset, offset + CHARS_PER_LINE).map((c) => ({ ...c })))
+  }
+
+  return rows
+}
+
+type PaperTitleRowSpec = { padLeft: number; chars: string[]; padRight: number }
+
+function buildPaperTitleRowSpecs(rawTitle: string): PaperTitleRowSpec[] {
+  const chars = Array.from(rawTitle.trim() || '未命名作文')
+  if (!chars.length) {
+    return [{ padLeft: CHARS_PER_LINE, chars: [], padRight: 0 }]
+  }
+  if (chars.length <= CHARS_PER_LINE) {
+    const pad = CHARS_PER_LINE - chars.length
+    const padLeft = Math.floor(pad / 2)
+    return [{ padLeft, chars, padRight: pad - padLeft }]
+  }
+  const specs: PaperTitleRowSpec[] = []
+  for (let i = 0; i < chars.length; i += CHARS_PER_LINE) {
+    const chunk = chars.slice(i, i + CHARS_PER_LINE)
+    specs.push({
+      padLeft: 0,
+      chars: chunk,
+      padRight: CHARS_PER_LINE - chunk.length,
+    })
+  }
+  return specs
+}
 
 function commentTypeToAnnotationType(commentType?: number) {
   if (commentType === 2) return 'suggestion'
+  if (commentType === 4) return 'highlight'
   return 'revision'
 }
 
@@ -222,7 +291,7 @@ export function ReviewAnnotationPage() {
     const result: Array<{
       text: string
       isTitle: boolean
-      rows: Array<Array<{ char: string; index: number; annotation: Annotation | null }>>
+      rows: Array<Array<AnnotationGridCell>>
     }> = []
 
     lines.forEach((line, lineIndex) => {
@@ -237,14 +306,12 @@ export function ReviewAnnotationPage() {
         }
       })
 
-      const rows: Array<Array<{ char: string; index: number; annotation: Annotation | null }>> = []
-      for (let index = 0; index < chars.length; index += CHARS_PER_LINE) {
-        rows.push(chars.slice(index, index + CHARS_PER_LINE))
-      }
+      const isTitle = lineIndex === 0 && trimmed.length > 0 && trimmed.length <= 20
+      const rows = buildParagraphRows(chars, isTitle)
 
       result.push({
         text,
-        isTitle: lineIndex === 0 && trimmed.length > 0 && trimmed.length <= 20,
+        isTitle,
         rows,
       })
     })
@@ -256,10 +323,16 @@ export function ReviewAnnotationPage() {
       Object.fromEntries(annotations.map((annotation, index) => [annotation.id, index + 1])),
     [annotations],
   )
-  const summaryComment = useMemo(
-    () => detail?.comments?.find((comment) => comment.commentType === 1)?.content?.replace(/^【总评】\s*/u, '').trim() || '',
-    [detail],
-  )
+  const summaryComment = useMemo(() => {
+    const raw = detail?.comments?.find((comment) => comment.commentType === 1)?.content || ''
+    return extractOverallSummaryLead(raw)
+  }, [detail])
+
+  const paperTitleRowSpecs = useMemo(() => {
+    if (!detail || !essay) return []
+    const title = (detail.essayTitle || essay.title || '未命名作文').trim() || '未命名作文'
+    return buildPaperTitleRowSpecs(title)
+  }, [detail, essay])
 
   useEffect(() => {
     setActiveId((current) => (current && annotations.some((annotation) => annotation.id === current) ? current : null))
@@ -393,10 +466,35 @@ export function ReviewAnnotationPage() {
         <article className="panel annotation-report-panel">
           <div className="annotation-report-grid">
             <div className="annotation-report-paper">
-              <p className="eyebrow">作文正文</p>
-              <h3>{detail.essayTitle || essay.title || '未命名作文'}</h3>
               <div className="annotation-paper-wrap" ref={paperRef}>
                 <div className="annotation-paper annotation-paper-report">
+                  {paperTitleRowSpecs.map((spec, rowIdx) => (
+                    <div
+                      key={`paper-title-row-${rowIdx}`}
+                      className="annotation-row annotation-row-paper-title"
+                      style={{ gridTemplateColumns: `repeat(${CHARS_PER_LINE}, var(--essay-cell-size))` }}
+                    >
+                      {Array.from({ length: spec.padLeft }, (_, i) => (
+                        <span
+                          key={`paper-title-pl-${rowIdx}-${i}`}
+                          className="annotation-cell annotation-cell-empty"
+                          aria-hidden="true"
+                        />
+                      ))}
+                      {spec.chars.map((ch, i) => (
+                        <span key={`paper-title-ch-${rowIdx}-${i}`} className="annotation-cell annotation-plain annotation-cell-paper-title">
+                          {ch}
+                        </span>
+                      ))}
+                      {Array.from({ length: spec.padRight }, (_, i) => (
+                        <span
+                          key={`paper-title-pr-${rowIdx}-${i}`}
+                          className="annotation-cell annotation-cell-empty"
+                          aria-hidden="true"
+                        />
+                      ))}
+                    </div>
+                  ))}
                   {paragraphs.length ? (
                     paragraphs.map((paragraph, paragraphIndex) => (
                       <section
@@ -413,6 +511,15 @@ export function ReviewAnnotationPage() {
                             >
                               {row.map((cell, cellIndex) => {
                                 const annotation = cell.annotation
+                                if (cell.indent) {
+                                  return (
+                                    <span
+                                      key={`indent-${paragraphIndex}-${rowIndex}-${cellIndex}`}
+                                      className="annotation-cell annotation-cell-indent"
+                                      aria-hidden="true"
+                                    />
+                                  )
+                                }
                                 if (!annotation) {
                                   return (
                                     <span key={`plain-${paragraphIndex}-${rowIndex}-${cellIndex}`} className="annotation-cell annotation-plain">
@@ -464,9 +571,13 @@ export function ReviewAnnotationPage() {
                                   </span>
                                 )
                               })}
-                              {!paragraph.isTitle && row.length < CHARS_PER_LINE
+                              {row.length < CHARS_PER_LINE
                                 ? Array.from({ length: CHARS_PER_LINE - row.length }).map((_, emptyIndex) => (
-                                    <span key={`empty-${paragraphIndex}-${rowIndex}-${emptyIndex}`} className="annotation-cell annotation-cell-empty" />
+                                    <span
+                                      key={`empty-${paragraphIndex}-${rowIndex}-${emptyIndex}`}
+                                      className="annotation-cell annotation-cell-empty"
+                                      aria-hidden="true"
+                                    />
                                   ))
                                 : null}
                             </div>
@@ -483,7 +594,7 @@ export function ReviewAnnotationPage() {
               </div>
 
               {summaryComment ? (
-                <section className="annotation-summary-block">
+                <section className="annotation-summary-block" style={{ fontSize: '12px' }}>
                   <div className="annotation-summary-title">总评</div>
                   <p>{summaryComment}</p>
                 </section>

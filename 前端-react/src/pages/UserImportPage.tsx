@@ -118,25 +118,44 @@ export function UserImportPage() {
 
   return (
     <div className="page-grid">
-      <section className="panel user-admin-panel">
-        <div className="user-admin-heading">
-          <p className="eyebrow">管理员能力</p>
-          <h3>全部用户管理</h3>
+      <section className="panel user-admin-panel enhanced-user-panel">
+        <div className="user-admin-heading enhanced-heading">
+          <div>
+            <p className="eyebrow">管理员能力</p>
+            <h3>全部用户管理</h3>
+          </div>
+          <div className="heading-actions">
+            <span className="total-users-badge">共 {users.length} 个用户</span>
+          </div>
         </div>
         {usersError ? <div className="feedback error">{usersError}</div> : null}
         {usersLoading ? (
-          <div className="feedback">用户列表加载中...</div>
+          <div className="feedback loading-feedback">用户列表加载中...</div>
         ) : (
-          <div className="stack-list user-admin-list">
+          <div className="stack-list user-admin-list enhanced-list">
             {users.map((item) => (
-              <article key={item.id} className="list-row user-admin-row">
+              <article key={item.id} className="list-row user-admin-row enhanced-user-row">
                 <div className="user-admin-meta">
-                  <strong>{item.userName}</strong>
-                  <p>ID: {item.id} · 角色: {roleText(item.role)} · 状态: {item.status === 1 ? '启用' : '禁用'}</p>
+                  <div className="user-row-avatar">
+                    {item.userName.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="user-row-info">
+                    <div className="user-row-title">
+                      <strong>{item.userName}</strong>
+                      <span className={`status-badge ${item.status === 1 ? 'status-active' : 'status-disabled'}`}>
+                        {item.status === 1 ? '已启用' : '已禁用'}
+                      </span>
+                    </div>
+                    <p>
+                      <span>ID: {item.id}</span>
+                      <span className="dot-divider">·</span>
+                      <span>角色: {roleText(item.role)}</span>
+                    </p>
+                  </div>
                 </div>
                 <div className="action-row user-admin-actions">
                   <select
-                    className="user-admin-select"
+                    className="user-admin-select enhanced-select"
                     value={item.role}
                     onChange={(event) => patchUser(item.id, { role: Number(event.target.value) })}
                   >
@@ -145,29 +164,31 @@ export function UserImportPage() {
                     <option value={3}>管理员</option>
                   </select>
                   <select
-                    className="user-admin-select"
+                    className="user-admin-select enhanced-select"
                     value={item.status}
                     onChange={(event) => patchUser(item.id, { status: Number(event.target.value) })}
                   >
                     <option value={1}>启用</option>
                     <option value={0}>禁用</option>
                   </select>
-                  <button
-                    type="button"
-                    className="secondary-button user-admin-btn"
-                    onClick={() => saveUser(item)}
-                    disabled={savingId === item.id}
-                  >
-                    {savingId === item.id ? '保存中...' : '保存'}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger-button user-admin-btn"
-                    onClick={() => removeUser(item)}
-                    disabled={deletingId === item.id}
-                  >
-                    {deletingId === item.id ? '删除中...' : '删除'}
-                  </button>
+                  <div className="btn-group">
+                    <button
+                      type="button"
+                      className="secondary-button user-admin-btn enhanced-btn"
+                      onClick={() => saveUser(item)}
+                      disabled={savingId === item.id}
+                    >
+                      {savingId === item.id ? '保存中' : '保存'}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger-button user-admin-btn enhanced-btn-danger"
+                      onClick={() => removeUser(item)}
+                      disabled={deletingId === item.id}
+                    >
+                      {deletingId === item.id ? '删除中' : '删除'}
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -176,35 +197,69 @@ export function UserImportPage() {
         )}
       </section>
 
-      <section className="split-grid">
-        <article className="panel">
-          <p className="eyebrow">管理员能力</p>
-          <h3>批量导入用户</h3>
-          <form className="form-grid" onSubmit={submitImport}>
-            <label className="field">
-              <span>选择 CSV 文件</span>
+      <section className="split-grid enhanced-split-grid">
+        <article className="panel enhanced-import-panel">
+          <div className="import-header">
+            <div className="icon-circle">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            </div>
+            <div>
+              <p className="eyebrow">管理员能力</p>
+              <h3>批量导入用户</h3>
+            </div>
+          </div>
+          <form className="form-grid import-form" onSubmit={submitImport}>
+            <div className="upload-zone">
               <input
                 type="file"
+                id="csv-upload"
+                className="file-input-hidden"
                 accept=".csv,text/csv"
                 onChange={(event) => setFile(event.target.files?.[0] || null)}
               />
-            </label>
-            <button type="submit" className="primary-button" disabled={loading}>
-              {loading ? '导入中...' : '开始导入'}
+              <label htmlFor="csv-upload" className="upload-label">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="upload-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="12" y2="12"></line><line x1="15" y1="15" x2="12" y2="12"></line></svg>
+                <span className="upload-text">
+                  {file ? file.name : '点击选择 CSV 文件，或拖拽文件到此处'}
+                </span>
+                {file && <span className="upload-hint">已选择文件，准备导入</span>}
+              </label>
+            </div>
+            <button type="submit" className="primary-button import-submit-btn" disabled={loading || !file}>
+              {loading ? '正在导入中...' : '开始批量导入'}
             </button>
           </form>
           {error ? <div className="feedback error">{error}</div> : null}
         </article>
 
-        <article className="panel panel-soft">
-          <p className="eyebrow">文件格式</p>
-          <h3>CSV 列定义</h3>
-          <ul className="plain-list">
-            <li>表头：`userName,password,role,status`</li>
-            <li>角色：`1` 学生，`2` 老师，`3` 管理员</li>
-            <li>状态：`1` 启用，`0` 禁用（可选，默认 1）</li>
-            <li>示例：`zhangsan,123456,1,1`</li>
-          </ul>
+        <article className="panel panel-soft enhanced-doc-panel">
+          <div className="doc-header">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+            <div>
+              <p className="eyebrow">文件格式说明</p>
+              <h3>CSV 列定义要求</h3>
+            </div>
+          </div>
+          <div className="doc-content">
+            <ul className="plain-list doc-list">
+              <li>
+                <span className="doc-bullet"></span>
+                <span><strong>表头要求：</strong> 必须包含 <code className="code-inline">userName,password,role,status</code></span>
+              </li>
+              <li>
+                <span className="doc-bullet"></span>
+                <span><strong>角色映射：</strong> <code className="code-inline">1</code> 代表学生，<code className="code-inline">2</code> 代表老师，<code className="code-inline">3</code> 代表管理员</span>
+              </li>
+              <li>
+                <span className="doc-bullet"></span>
+                <span><strong>状态设定：</strong> <code className="code-inline">1</code> 代表启用，<code className="code-inline">0</code> 代表禁用（选填，默认启用）</span>
+              </li>
+              <li className="doc-example">
+                <span className="doc-bullet doc-bullet-example"></span>
+                <span><strong>数据示例：</strong> <code className="code-block">zhangsan,123456,1,1</code></span>
+              </li>
+            </ul>
+          </div>
         </article>
       </section>
 

@@ -64,7 +64,7 @@ export default function App() {
           <Route
             path="dimensions"
             element={
-              <ProtectedRoute allowedRoles={['ADMIN']}>
+              <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'ADMIN']}>
                 <DimensionsPage />
               </ProtectedRoute>
             }
@@ -80,7 +80,7 @@ export default function App() {
           <Route
             path="dimensions/create"
             element={
-              <ProtectedRoute allowedRoles={['ADMIN']}>
+              <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'ADMIN']}>
                 <RuleCreatePage />
               </ProtectedRoute>
             }
@@ -88,7 +88,7 @@ export default function App() {
           <Route
             path="dimensions/:ruleId/edit"
             element={
-              <ProtectedRoute allowedRoles={['ADMIN']}>
+              <ProtectedRoute allowedRoles={['STUDENT', 'TEACHER', 'ADMIN']}>
                 <RuleEditPage />
               </ProtectedRoute>
             }

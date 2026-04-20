@@ -50,10 +50,13 @@ JOIN `permission` p
       ))
       OR (r.role_code = 'TEACHER' AND p.permission_code IN (
           'review:rule:read',
+          'review:rule:write',
           'review:dimension:read',
           'ocr:read:owner'
       ))
       OR (r.role_code = 'STUDENT' AND p.permission_code IN (
+          'review:rule:read',
+          'review:rule:write',
           'ocr:read:owner'
       ))
   )

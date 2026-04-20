@@ -150,25 +150,25 @@ export function DimensionLibraryPage() {
           <div className="stack-list">
             {dimensions.length ? (
               dimensions.map((item) => (
-                <div key={item.dimensionId} className="dimension-edit-card dimension-mini-card">
-                  <div className="dimension-mini-top">
-                    <span className="dimension-mini-tag">公共维度</span>
+                <div key={item.dimensionId} className="dimension-edit-card dimension-mini-card enhanced-dimension-card">
+                  <div className="dimension-card-header">
+                    <div className="dimension-card-title-wrap">
+                      <div className="dimension-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                      </div>
+                      <h4 className="dimension-mini-title">{item.dimensionName}</h4>
+                      <span className="dimension-mini-tag">公共维度</span>
+                    </div>
                     <span className={`dimension-mini-status ${item.status === 1 ? 'is-on' : 'is-off'}`}>
+                      <span className="status-dot"></span>
                       {item.status === 1 ? '启用' : '禁用'}
                     </span>
                   </div>
 
-                  <h4 className="dimension-mini-title">{item.dimensionName}</h4>
                   <p className="dimension-mini-desc">{item.description || '暂无评分说明'}</p>
 
-                  <div className="dimension-mini-stats">
-                    <span>权重 {item.weight}</span>
-                    <span>满分 {item.maxScore}</span>
-                    <span>排序 {item.sortOrder ?? 0}</span>
-                  </div>
-
                   {editingId === item.dimensionId ? (
-                    <div className="dimension-mini-editor">
+                    <div className="dimension-mini-editor enhanced-editor">
                       <div className="card-grid three-col">
                         <label className="field">
                           <span>名称</span>
@@ -212,20 +212,22 @@ export function DimensionLibraryPage() {
                           />
                         </label>
                       </div>
-                      <label className="field">
-                        <span>排序值</span>
-                        <input
-                          type="number"
-                          value={item.sortOrder ?? 0}
-                          onChange={(event) =>
-                            setDimensions((prev) =>
-                              prev.map((row) =>
-                                row.dimensionId === item.dimensionId ? { ...row, sortOrder: Number(event.target.value) } : row,
-                              ),
-                            )
-                          }
-                        />
-                      </label>
+                      <div className="card-grid two-col">
+                        <label className="field">
+                          <span>排序值</span>
+                          <input
+                            type="number"
+                            value={item.sortOrder ?? 0}
+                            onChange={(event) =>
+                              setDimensions((prev) =>
+                                prev.map((row) =>
+                                  row.dimensionId === item.dimensionId ? { ...row, sortOrder: Number(event.target.value) } : row,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
                       <label className="field">
                         <span>评分说明</span>
                         <textarea
@@ -243,32 +245,56 @@ export function DimensionLibraryPage() {
                     </div>
                   ) : null}
 
-                  <div className="action-row dimension-mini-actions">
-                    {editingId === item.dimensionId ? (
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() => {
+                  <div className="dimension-card-footer">
+                    <div className="dimension-mini-stats enhanced-stats">
+                      <div className="stat-item">
+                        <span className="stat-label">权重</span>
+                        <span className="stat-value">{item.weight}%</span>
+                      </div>
+                      <div className="stat-divider"></div>
+                      <div className="stat-item">
+                        <span className="stat-label">满分</span>
+                        <span className="stat-value">{item.maxScore}分</span>
+                      </div>
+                      <div className="stat-divider"></div>
+                      <div className="stat-item">
+                        <span className="stat-label">排序</span>
+                        <span className="stat-value">{item.sortOrder ?? 0}</span>
+                      </div>
+                    </div>
+
+                    <div className="action-row dimension-mini-actions">
+                      {editingId === item.dimensionId ? (
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => {
+                            setEditingId(null)
+                            loadData().catch(() => undefined)
+                          }}
+                        >
+                          取消
+                        </button>
+                      ) : (
+                        <button type="button" className="secondary-button" onClick={() => setEditingId(item.dimensionId)}>
+                          编辑
+                        </button>
+                      )}
+                      {editingId === item.dimensionId && (
+                        <button type="button" className="primary-button" onClick={() => {
+                          saveDimension(item)
                           setEditingId(null)
-                          loadData().catch(() => undefined)
-                        }}
-                      >
-                        取消
+                        }}>
+                          保存
+                        </button>
+                      )}
+                      <button type="button" className="secondary-button" onClick={() => toggleDimensionStatus(item)}>
+                        {item.status === 1 ? '禁用' : '启用'}
                       </button>
-                    ) : (
-                      <button type="button" className="secondary-button" onClick={() => setEditingId(item.dimensionId)}>
-                        编辑
+                      <button type="button" className="danger-button" onClick={() => removeDimension(item)}>
+                        删除
                       </button>
-                    )}
-                    <button type="button" className="secondary-button" onClick={() => saveDimension(item)}>
-                      保存
-                    </button>
-                    <button type="button" className="secondary-button" onClick={() => toggleDimensionStatus(item)}>
-                      {item.status === 1 ? '禁用' : '启用'}
-                    </button>
-                    <button type="button" className="danger-button" onClick={() => removeDimension(item)}>
-                      删除
-                    </button>
+                    </div>
                   </div>
                 </div>
               ))

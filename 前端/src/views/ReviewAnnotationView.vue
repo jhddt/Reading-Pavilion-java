@@ -419,6 +419,9 @@ onBeforeUnmount(() => {
         <!-- 作文内容 -->
         <div class="essay-content essay-paper-shell">
           <div class="essay-grid-sheet" v-if="essayParagraphs.length">
+            <div class="essay-title-row">
+              <span class="essay-title-text">{{ reviewStore.currentReview.essayTitle || '未命名作文' }}</span>
+            </div>
             <template v-for="paragraph in essayParagraphs" :key="paragraph.id">
               <template v-for="line in paragraph.lines" :key="line.id">
                 <div class="essay-paragraph">
@@ -606,7 +609,7 @@ onBeforeUnmount(() => {
 /* 主内容区 */
 .content-wrapper {
   flex: 1;
-  padding: 20px 0 0;
+  padding: 12px 0 0;
 }
 
 .essay-container {
@@ -620,7 +623,7 @@ onBeforeUnmount(() => {
 
 /* 作文内容 */
 .essay-content {
-  padding: 24px;
+  padding: 18px;
   border-radius: 24px;
   box-shadow: var(--shadow);
   border: 1px solid rgba(56, 44, 31, 0.08);
@@ -635,11 +638,26 @@ onBeforeUnmount(() => {
 .essay-grid-sheet {
   width: 100%;
   max-width: 820px;
-  padding: 18px 18px 22px;
+  padding: 16px 18px 18px;
   border-radius: 18px;
   border: 1px solid rgba(77, 92, 116, 0.16);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 246, 238, 0.98));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.essay-title-row {
+  text-align: center;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(77, 92, 116, 0.12);
+}
+
+.essay-title-text {
+  font-family: 'KaiTi', 'STKaiti', 'FangSong', serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: #1d3f53;
+  letter-spacing: 2px;
 }
 
 .essay-empty {
@@ -655,7 +673,7 @@ onBeforeUnmount(() => {
 }
 
 .essay-paragraph + .essay-paragraph {
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .essay-segment {
@@ -780,7 +798,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 250, 243, 0.92);
   border-radius: 24px;
   box-shadow: var(--shadow);
-  padding: 16px;
+  padding: 14px;
   border: 1px solid rgba(56, 44, 31, 0.08);
   max-height: calc(100vh - 120px);
   overflow-y: auto;

@@ -10,7 +10,8 @@ export function DimensionsPage() {
   const navigate = useNavigate()
   const [rules, setRules] = useState<ReviewRule[]>([])
   const [error, setError] = useState('')
-  const canManage = hasAnyRole(user?.role, ['ADMIN'])
+  const canManageDimension = hasAnyRole(user?.role, ['ADMIN'])
+  const canManageRule = hasAnyRole(user?.role, ['STUDENT', 'TEACHER', 'ADMIN'])
 
   const loadData = async () => {
     try {
@@ -50,7 +51,7 @@ export function DimensionsPage() {
           <p className="eyebrow">批改规则</p>
           <h3>管理批改细则</h3>
         </div>
-        {canManage ? (
+        {canManageRule ? (
           <div className="action-row">
             <Link to="/dimensions/create" className="primary-button link-button">
               新增评分细则
@@ -91,7 +92,7 @@ export function DimensionsPage() {
                 </div>
               ) : null}
             </div>
-            {canManage ? (
+            {canManageRule ? (
               <div className="action-row top-gap">
                 <button type="button" className="secondary-button" onClick={() => navigate(`/dimensions/${rule.ruleId}/edit`)}>
                   编辑细则

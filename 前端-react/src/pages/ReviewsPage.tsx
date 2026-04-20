@@ -41,11 +41,19 @@ export function ReviewsPage() {
     loadData().catch(() => undefined)
   }, [page, reviewerType, searchParams, status, token])
 
-  const removeReview = async (reviewId: number) => {
-    if (!window.confirm('确定删除这条批改记录吗？')) return
+  const removeReview = async (reviewId: number, essayId?: number) => {
+    if (!window.confirm('确定删除这条批改记录吗？删除后可以重新批改该作文。')) return
     try {
       await api.delete<void>(`/review/record/${reviewId}`, token)
       setRecords((prev) => prev.filter((item) => item.reviewId !== reviewId))
+      
+      // 如果有essayId，提示用户可以重新批改
+      if (essayId) {
+        const shouldNavigate = window.confirm('批改记录已删除，作文已恢复为"已提交"状态。是否前往作文详情页重新批改？')
+        if (shouldNavigate) {
+          navigate(`/essays/${essayId}`)
+        }
+      }
     } catch (err) {
       setError((err as Error).message || '删除失败')
     }
@@ -106,7 +114,7 @@ export function ReviewsPage() {
                   手动批改
                 </button>
               ) : null}
-              <button type="button" className="danger-button" onClick={() => removeReview(item.reviewId)}>
+              <button type="button" className="danger-button" onClick={() => removeReview(item.reviewId, item.essayId)}>
                 删除记录
               </button>
             </div>
