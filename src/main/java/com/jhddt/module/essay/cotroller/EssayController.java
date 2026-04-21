@@ -203,7 +203,7 @@ public class EssayController {
             // 2.3 OCR 识别
             OcrResult ocrResult = ocrService.recognizeText(imagePath);
 
-            String text = ocrResult.getText() != null ? ocrResult.getText().trim() : "";
+            String text = pickBestOcrText(ocrResult);
             if (!text.isEmpty()) {
                 if (mergedText.length() > 0) {
                     mergedText.append("\n");
@@ -655,6 +655,40 @@ public class EssayController {
                                 || "ROLE_ADMIN".equals(authority)
                                 || "ROLE_2".equals(authority)
                                 || "ROLE_3".equals(authority));
+    }
+
+    /**
+     * 优先使用 OCR 的格式化文本，避免将“逐字空格分隔”的原始扫描文本直接展示给前端。
+     */
+    private String pickBestOcrText(OcrResult ocrResult) {
+        if (ocrResult == null) {
+            return "";
+        }
+        String formatted = normalizeOcrText(ocrResult.getFormattedText());
+        if (!formatted.isEmpty()) {
+            return formatted;
+        }
+        return normalizeOcrText(ocrResult.getText());
+    }
+
+    /**
+     * 对 OCR 结果做轻量清洗：
+     * 1) 统一换行符
+     * 2) 去除中文字符之间的异常空格
+     * 3) 去除中文标点前后的异常空格
+     */
+    private String normalizeOcrText(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String text = raw.replace("\r\n", "\n").replace('\r', '\n').trim();
+        if (text.isEmpty()) {
+            return "";
+        }
+        text = text.replaceAll("(?<=[\\p{IsHan}])[ \\t]+(?=[\\p{IsHan}])", "");
+        text = text.replaceAll("[ \\t]+([，。！？；：、“”‘’《》【】（）])", "$1");
+        text = text.replaceAll("([，。！？；：、“”‘’《》【】（）])[ \\t]+", "$1");
+        return text;
     }
 
     /**

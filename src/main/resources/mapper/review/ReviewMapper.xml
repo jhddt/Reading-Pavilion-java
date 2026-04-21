@@ -266,7 +266,7 @@
     <select id="selectAllRules"
             resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
         SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
-               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail, writing_techniques,
                status, create_time, update_time, is_deleted
         FROM review_rule
         WHERE is_deleted = 0
@@ -276,7 +276,7 @@
     <select id="selectEnabledRules"
             resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
         SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
-               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail, writing_techniques,
                status, create_time, update_time, is_deleted
         FROM review_rule
         WHERE status = 1 AND is_deleted = 0
@@ -287,7 +287,7 @@
             parameterType="long"
             resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
         SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
-               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail, writing_techniques,
                status, create_time, update_time, is_deleted
         FROM review_rule
         WHERE rule_id = #{id} AND is_deleted = 0
@@ -296,7 +296,7 @@
     <select id="selectActiveRule"
             resultType="com.jhddt.module.review.entity.ReviewRuleEntity">
         SELECT rule_id, rule_name, review_type, grade_level, prompt_template,
-               topic_requirement, beautify_level, custom_requirement, deduction_detail,
+               topic_requirement, beautify_level, custom_requirement, deduction_detail, writing_techniques,
                status, create_time, update_time, is_deleted
         FROM review_rule
         WHERE status = 1 AND is_deleted = 0
@@ -311,10 +311,10 @@
             keyColumn="rule_id">
         INSERT INTO review_rule
         (rule_name, review_type, grade_level, prompt_template, topic_requirement,
-         beautify_level, custom_requirement, deduction_detail, status, is_deleted)
+         beautify_level, custom_requirement, deduction_detail, writing_techniques, status, is_deleted)
         VALUES
         (#{ruleName}, #{reviewType}, #{gradeLevel}, #{promptTemplate}, #{topicRequirement},
-         #{beautifyLevel}, #{customRequirement}, #{deductionDetail}, #{status}, 0)
+         #{beautifyLevel}, #{customRequirement}, #{deductionDetail}, #{writingTechniques}, #{status}, 0)
     </insert>
 
     <update id="updateRuleById"
@@ -329,6 +329,7 @@
             <if test="beautifyLevel != null">beautify_level = #{beautifyLevel},</if>
             <if test="customRequirement != null">custom_requirement = #{customRequirement},</if>
             <if test="deductionDetail != null">deduction_detail = #{deductionDetail},</if>
+            <if test="writingTechniques != null">writing_techniques = #{writingTechniques},</if>
             <if test="status != null">status = #{status},</if>
             is_deleted = 0,
             update_time = NOW()

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { ManualReviewWorkspace, type ManualAnnotation } from '../components/ManualReviewWorkspace'
 import { api } from '../lib/api'
+import { normalizeOcrTextForDisplay } from '../lib/ocrText'
 import type { Essay, ReviewDetail } from '../types'
 
 export function EssayManualReviewPage() {
@@ -76,7 +77,7 @@ export function EssayManualReviewPage() {
         </div>
 
         <ManualReviewWorkspace
-          contentText={essay.finalContent || essay.originalContent || ''}
+          contentText={normalizeOcrTextForDisplay(essay.finalContent || essay.originalContent || '')}
           summary={summary}
           annotations={annotations}
           loading={loading}

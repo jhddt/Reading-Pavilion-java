@@ -8,7 +8,7 @@ import { formatDateTime, roleText } from '../lib/format'
 const navigationItems = [
   { to: '/dashboard', label: '概览', icon: '📊', description: '系统概览与快捷入口' },
   { to: '/essays', label: '作文', icon: '📝', description: '作文列表与新建内容' },
-  { to: '/reviews', label: '批改', icon: '✅', description: '批改记录与结果查看' },
+  { to: '/reviews', label: '批改记录', icon: '✅', description: '批改记录与结果查看' },
   { to: '/dimensions', label: '细则', icon: '📐', description: '批改细则与规则管理', minRole: 'STUDENT' },
   { to: '/dimension-library', label: '维度', icon: '📏', description: '公共评分维度库管理', adminOnly: true },
   { to: '/audit-logs', label: '日志', icon: '🧾', description: '管理员操作审计日志', adminOnly: true },

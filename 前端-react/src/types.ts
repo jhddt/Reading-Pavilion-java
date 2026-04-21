@@ -109,6 +109,7 @@ export interface ReviewRule {
   beautifyLevel?: string
   customRequirement?: string
   deductionDetail?: string
+  writingTechniques?: string
   status?: number
 }
 

@@ -56,6 +56,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import jakarta.servlet.http.HttpServletRequest;
 import io.jsonwebtoken.Claims;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.*;
@@ -143,7 +144,7 @@ public class ReviewService {
         // 3) 构建提示词（并作为 rule_version 快照存档）
         String prompt = buildReviewPrompt(essay.getTitle(), essayContent, selectedRule);
 
-        // 4) 先插入 review_record（PROCESSING）
+        // 4) 先插入 review_record（CREATED）
         LocalDateTime startTime = LocalDateTime.now();
         ReviewRecordEntity record = ReviewRecordEntity.builder()
                 .essayId(essayId)
@@ -152,7 +153,7 @@ public class ReviewService {
                 .ruleVersion(serializeRuleSnapshot(ruleSnapshot))
                 .modelVersion("deepseek-chat")
                 .startTime(startTime)
-                .status(1) // PROCESSING
+                .status(0) // CREATED - 任务已创建
                 .retryCount(0)
                 .build();
         reviewMapper.insertReviewRecord(record);
@@ -164,7 +165,7 @@ public class ReviewService {
         cacheReviewStatus(ReviewStatusVO.builder()
                 .reviewId(reviewId)
                 .essayId(essayId)
-                .status(1)
+                .status(0) // CREATED
                 .updateTime(startTime)
                 .build());
 
@@ -200,7 +201,7 @@ public class ReviewService {
             throw new RuntimeException("批改任务投递失败，请稍后重试");
         }
 
-        // 6) 立即返回，包含 reviewId 和 PROCESSING 状态
+        // 6) 立即返回，包含 reviewId 和 CREATED 状态
         ReviewRecordDetailVO vo = ReviewRecordDetailVO.builder()
                 .reviewId(reviewId)
                 .essayId(essayId)
@@ -208,7 +209,7 @@ public class ReviewService {
                 .reviewerType(0)
                 .modelVersion("deepseek-chat")
                 .startTime(startTime)
-                .status(1) // PROCESSING
+                .status(0) // CREATED - 任务已创建
                 .ruleId(ruleSnapshot.getRuleId())
                 .ruleName(ruleSnapshot.getRuleName())
                 .reviewType(ruleSnapshot.getReviewType())
@@ -223,14 +224,14 @@ public class ReviewService {
             log.error("批改任务对应作文不存在，reviewId={}, essayId={}", reviewId, essayId);
             reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
                     .reviewId(reviewId)
-                    .status(3)
+                    .status(4) // FAIL
                     .endTime(LocalDateTime.now())
                     .errorMsg("作文不存在")
                     .build());
             cacheReviewStatus(ReviewStatusVO.builder()
                     .reviewId(reviewId)
                     .essayId(essayId)
-                    .status(3)
+                    .status(4) // FAIL
                     .errorMsg("作文不存在")
                     .updateTime(LocalDateTime.now())
                     .build());
@@ -246,7 +247,7 @@ public class ReviewService {
         if (essayContent == null || essayContent.trim().isEmpty()) {
             reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
                     .reviewId(reviewId)
-                    .status(3)
+                    .status(4) // FAIL
                     .endTime(LocalDateTime.now())
                     .errorMsg("作文内容为空，无法评审")
                     .build());
@@ -254,7 +255,7 @@ public class ReviewService {
             cacheReviewStatus(ReviewStatusVO.builder()
                     .reviewId(reviewId)
                     .essayId(essayId)
-                    .status(3)
+                    .status(4) // FAIL
                     .errorMsg("作文内容为空，无法评审")
                     .updateTime(LocalDateTime.now())
                     .build());
@@ -269,20 +270,44 @@ public class ReviewService {
         try {
             log.info("开始消费 RabbitMQ 批改任务，reviewId={}, essayId={}", reviewId, essayId);
 
-            // 1) 先调用文本纠错服务并保存（不影响主流程，失败仅记录日志）
+            // 1) 更新状态：错字修改处理中
+            reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(1) // CORRECTING_TEXT - 错字修改处理中
+                    .build());
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(1)
+                    .updateTime(LocalDateTime.now())
+                    .build());
+
+            // 2) 调用文本纠错服务并保存（不影响主流程，失败仅记录日志）
             try {
                 callTextCorrectionAndSave(reviewId, essayContent);
             } catch (Exception e) {
                 log.error("文本纠错失败，但不影响批改流程，reviewId={}, error={}", reviewId, e.getMessage(), e);
             }
 
-            // 2) 调用 AI 批改
+            // 3) 更新状态：内容批改生成中
+            reviewMapper.updateReviewRecordById(ReviewRecordEntity.builder()
+                    .reviewId(reviewId)
+                    .status(2) // REVIEWING_CONTENT - 内容批改生成中
+                    .build());
+            cacheReviewStatus(ReviewStatusVO.builder()
+                    .reviewId(reviewId)
+                    .essayId(essayId)
+                    .status(2)
+                    .updateTime(LocalDateTime.now())
+                    .build());
+
+            // 4) 调用 AI 批改
             ReviewResult aiResult = callAi(prompt);
 
-            // 3) 保存各维度得分（先保存，用于计算总分）
+            // 5) 保存各维度得分（先保存，用于计算总分）
             List<ReviewScoreEntity> savedScores = saveDimensionScoresIfAny(reviewId, aiResult, selectedRule);
 
-            // 4) 计算总分：从 review_score 表中同一 review_id 的所有 score 字段求和
+            // 6) 计算总分：从 review_score 表中同一 review_id 的所有 score 字段求和
             BigDecimal calculatedTotalScore = calculateTotalScoreFromSavedScores(reviewId);
             // 如果计算出总分就用计算的，否则用 AI 返回的总分作为兜底
             BigDecimal totalScore = calculatedTotalScore != null
@@ -291,23 +316,23 @@ public class ReviewService {
                     ? aiResult.getStructuredPayload().getTotalScore()
                     : parseTotalScore(aiResult.getScore());
 
-            // 5) 更新记录（SUCCESS）
+            // 7) 保存评论（总评/建议/修改意见），并填充位置信息
+            saveCommentsWithPosition(reviewId, aiResult.getReviewContent(), essayContent);
+
+            // 8) 更新记录（SUCCESS - 批改结果整理完成）
             ReviewRecordEntity record = ReviewRecordEntity.builder()
                     .reviewId(reviewId)
-                    .status(2) // SUCCESS
+                    .status(3) // SUCCESS - 批改结果整理完成
                     .endTime(LocalDateTime.now())
                     .totalScore(totalScore)
                     .build();
             reviewMapper.updateReviewRecordById(record);
             updateEssayStatus(essayId, EssayStatus.CORRECTED);
-
-            // 6) 保存评论（总评/建议/修改意见），并填充位置信息
-            saveCommentsWithPosition(reviewId, aiResult.getReviewContent(), essayContent);
             evictReviewDetailCache(reviewId);
             cacheReviewStatus(ReviewStatusVO.builder()
                     .reviewId(reviewId)
                     .essayId(essayId)
-                    .status(2)
+                    .status(3) // SUCCESS
                     .totalScore(totalScore)
                     .updateTime(LocalDateTime.now())
                     .build());
@@ -319,7 +344,7 @@ public class ReviewService {
             log.error("异步批改失败，reviewId={}, essayId={}, error={}", reviewId, essayId, e.getMessage(), e);
             ReviewRecordEntity record = ReviewRecordEntity.builder()
                     .reviewId(reviewId)
-                    .status(3) // FAIL
+                    .status(4) // FAIL
                     .endTime(LocalDateTime.now())
                     .errorMsg(e.getMessage())
                     .build();
@@ -329,7 +354,7 @@ public class ReviewService {
             cacheReviewStatus(ReviewStatusVO.builder()
                     .reviewId(reviewId)
                     .essayId(essayId)
-                    .status(3)
+                    .status(4) // FAIL
                     .errorMsg(e.getMessage())
                     .updateTime(LocalDateTime.now())
                     .build());
@@ -428,7 +453,7 @@ public class ReviewService {
                 .modelVersion("teacher-manual")
                 .startTime(now)
                 .endTime(now)
-                .status(2)
+                .status(3) // SUCCESS - 教师手动批改直接完成
                 .retryCount(0)
                 .build();
         reviewMapper.insertReviewRecord(record);
@@ -491,7 +516,7 @@ public class ReviewService {
                     .ruleVersion("文本纠错")
                     .modelVersion("text-correction-service")
                     .startTime(startTime)
-                    .status(1) // PROCESSING
+                    .status(1) // CORRECTING_TEXT - 文本纠错处理中
                     .retryCount(0)
                     .build();
             reviewMapper.insertReviewRecord(record);
@@ -1281,6 +1306,16 @@ public class ReviewService {
         if (creating && (rule.getRuleName() == null || rule.getRuleName().trim().isEmpty())) {
             throw new IllegalArgumentException("ruleName 不能为空");
         }
+        if (rule.getWritingTechniques() != null && !rule.getWritingTechniques().trim().isEmpty()) {
+            try {
+                JsonNode node = objectMapper.readTree(rule.getWritingTechniques());
+                if (!node.isObject()) {
+                    throw new IllegalArgumentException("writingTechniques 必须是 JSON 对象");
+                }
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException("writingTechniques 不是合法 JSON: " + e.getOriginalMessage());
+            }
+        }
     }
 
     private void validateDimension(ScoreDimensionEntity dim, boolean creating) {
@@ -1558,7 +1593,7 @@ public class ReviewService {
     /**
      * 保存各维度得分
      * @param reviewId 评审记录ID
-     * @param reviewContent AI 返回的评审内容
+     * @param reviewResult AI 返回的评审内容
      * @return 保存的得分列表（用于后续计算总分）
      */
     private List<ReviewScoreEntity> saveDimensionScoresIfAny(Long reviewId, ReviewResult reviewResult, ReviewRuleEntity selectedRule) {
@@ -1657,7 +1692,7 @@ public class ReviewService {
         }
 
         // 保留2位小数，四舍五入
-        totalScore = totalScore.setScale(2, java.math.RoundingMode.HALF_UP);
+        totalScore = totalScore.setScale(2, RoundingMode.HALF_UP);
 
         log.debug("计算总分（从 review_score 表）：review_id={}, 得分记录数={}, 总分={}", 
                 reviewId, scores.size(), totalScore);
@@ -1934,7 +1969,26 @@ public class ReviewService {
         appendPromptEssayContext(prompt, essayTitle, essayContent);
         appendPromptDimensions(prompt, dimensions);
         appendPromptOutputFormat(prompt);
-        return prompt.toString();
+        
+        String finalPrompt = prompt.toString();
+        
+        // 美观地输出组装好的提示词到控制台
+        log.info("\n" + "=".repeat(100));
+        log.info("📝 批改提示词组装完成");
+        log.info("=".repeat(100));
+        log.info("作文标题: {}", essayTitle != null ? essayTitle : "无标题");
+        log.info("作文长度: {} 字", essayContent != null ? essayContent.length() : 0);
+        log.info("评分细则: {}", selectedRule != null ? selectedRule.getRuleName() : "默认细则");
+        log.info("评分维度: {} 个", dimensions != null ? dimensions.size() : 0);
+        log.info("-".repeat(100));
+        log.info("完整提示词内容:");
+        log.info("-".repeat(100));
+        log.info("\n{}\n", finalPrompt);
+        log.info("=".repeat(100));
+        log.info("提示词总长度: {} 字符", finalPrompt.length());
+        log.info("=".repeat(100) + "\n");
+        
+        return finalPrompt;
     }
 
     private void appendPromptSystemRules(StringBuilder prompt) {

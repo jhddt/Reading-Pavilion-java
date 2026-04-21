@@ -69,9 +69,11 @@ export function ReviewsPage() {
         <div className="action-row reviews-heading-actions">
           <select value={status} onChange={(event) => setStatus(event.target.value === '' ? '' : Number(event.target.value))}>
             <option value="">全部状态</option>
-            <option value="1">处理中</option>
-            <option value="2">成功</option>
-            <option value="3">失败</option>
+            <option value="0">任务已创建</option>
+            <option value="1">错字修改处理中</option>
+            <option value="2">内容批改生成中</option>
+            <option value="3">批改完成</option>
+            <option value="4">批改失败</option>
           </select>
           <select
             value={reviewerType}

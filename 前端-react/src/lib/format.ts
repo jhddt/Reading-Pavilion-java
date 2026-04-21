@@ -31,7 +31,13 @@ export function essayStatusText(status?: number) {
 }
 
 export function reviewStatusText(status?: number) {
-  const map: Record<number, string> = { 0: '初始化', 1: '处理中', 2: '成功', 3: '失败', 4: '超时' }
+  const map: Record<number, string> = { 
+    0: '任务已创建', 
+    1: '错字修改处理中', 
+    2: '内容批改生成中', 
+    3: '批改完成', 
+    4: '批改失败' 
+  }
   return status != null ? map[status] || '未知' : '未知'
 }
 

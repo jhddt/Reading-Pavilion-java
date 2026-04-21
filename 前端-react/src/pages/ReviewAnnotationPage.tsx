@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { hasAnyRole } from '../auth/roles'
 import { api } from '../lib/api'
+import { normalizeOcrTextForDisplay } from '../lib/ocrText'
 import { extractOverallSummaryLead } from '../lib/reviewSummaryText'
 import type { Essay, ReviewComment, ReviewDetail, TextCorrection } from '../types'
 
@@ -435,7 +436,10 @@ export function ReviewAnnotationPage() {
     loadData().catch(() => undefined)
   }, [reviewId, token])
 
-  const content = useMemo(() => normalizeLineBreaks(essay?.finalContent || essay?.originalContent || ''), [essay])
+  const content = useMemo(
+    () => normalizeLineBreaks(normalizeOcrTextForDisplay(essay?.finalContent || essay?.originalContent || '')),
+    [essay],
+  )
   const annotations = useMemo(() => (detail ? buildAnnotations(detail, content) : []), [content, detail])
   const paragraphs = useMemo(() => {
     const ranges = annotations.map((annotation) => ({
